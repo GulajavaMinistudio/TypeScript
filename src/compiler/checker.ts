@@ -721,7 +721,7 @@ namespace ts {
                 }
                 // declaration is after usage
                 // can be legal if usage is deferred (i.e. inside function or in initializer of instance property)
-                if (isUsedInFunctionOrInstanceProperty(usage)) {
+                if (isUsedInFunctionOrInstanceProperty(usage, declaration)) {
                     return true;
                 }
                 const sourceFiles = host.getSourceFiles();
@@ -751,9 +751,9 @@ namespace ts {
             // declaration is after usage, but it can still be legal if usage is deferred:
             // 1. inside a function
             // 2. inside an instance property initializer, a reference to a non-instance property
+            // 3. inside a static property initializer, a reference to a static method in the same class
             const container = getEnclosingBlockScopeContainer(declaration);
-            const isInstanceProperty = declaration.kind === SyntaxKind.PropertyDeclaration && !(getModifierFlags(declaration) & ModifierFlags.Static);
-            return isUsedInFunctionOrInstanceProperty(usage, isInstanceProperty, container);
+            return isUsedInFunctionOrInstanceProperty(usage, declaration, container);
 
             function isImmediatelyUsedInInitializerOfBlockScopedVariable(declaration: VariableDeclaration, usage: Node): boolean {
                 const container = getEnclosingBlockScopeContainer(declaration);
@@ -782,7 +782,7 @@ namespace ts {
                 return false;
             }
 
-            function isUsedInFunctionOrInstanceProperty(usage: Node, isDeclarationInstanceProperty?: boolean, container?: Node): boolean {
+            function isUsedInFunctionOrInstanceProperty(usage: Node, declaration: Node, container?: Node): boolean {
                 let current = usage;
                 while (current) {
                     if (current === container) {
@@ -793,13 +793,22 @@ namespace ts {
                         return true;
                     }
 
-                    const initializerOfInstanceProperty = current.parent &&
+                    const initializerOfProperty = current.parent &&
                         current.parent.kind === SyntaxKind.PropertyDeclaration &&
-                        (getModifierFlags(current.parent) & ModifierFlags.Static) === 0 &&
                         (<PropertyDeclaration>current.parent).initializer === current;
 
-                    if (initializerOfInstanceProperty) {
-                        return !isDeclarationInstanceProperty;
+                    if (initializerOfProperty) {
+                        if (getModifierFlags(current.parent) & ModifierFlags.Static) {
+                            if (declaration.kind === SyntaxKind.MethodDeclaration) {
+                                return true;
+                            }
+                        }
+                        else {
+                            const isDeclarationInstanceProperty = declaration.kind === SyntaxKind.PropertyDeclaration && !(getModifierFlags(declaration) & ModifierFlags.Static);
+                            if (!isDeclarationInstanceProperty || getContainingClass(usage) !== getContainingClass(declaration)) {
+                                return true;
+                            }
+                        }
                     }
 
                     current = current.parent;
@@ -1544,9 +1553,9 @@ namespace ts {
                 }
             }
             else if (name.kind === SyntaxKind.ParenthesizedExpression) {
-                // If the expression in parenthsizedExpression is not an entity-name (e.g. it is a call expression), it won't be able to successfully resolve the name.
-                // This is the case when we are trying to do any language service operation in heritage clauses. By return undefined, the getSymbolOfEntityNameOrPropertyAccessExpression
-                // will attempt to checkPropertyAccessExpression to resolve symbol.
+                // If the expression in parenthesizedExpression is not an entity-name (e.g. it is a call expression), it won't be able to successfully resolve the name.
+                // This is the case when we are trying to do any language service operation in heritage clauses.
+                // By return undefined, the getSymbolOfEntityNameOrPropertyAccessExpression will attempt to checkPropertyAccessExpression to resolve symbol.
                 // i.e class C extends foo()./*do language service operation here*/B {}
                 return isEntityNameExpression(name.expression) ?
                     resolveEntityName(name.expression as EntityNameOrEntityNameExpression, meaning, ignoreErrors, dontResolveAlias, location) :
@@ -10382,6 +10391,8 @@ namespace ts {
                         getExportSymbolOfValueSymbolIfExported(getResolvedSymbol(<Identifier>source)) === getSymbolOfNode(target);
                 case SyntaxKind.ThisKeyword:
                     return target.kind === SyntaxKind.ThisKeyword;
+                case SyntaxKind.SuperKeyword:
+                    return target.kind === SyntaxKind.SuperKeyword;
                 case SyntaxKind.PropertyAccessExpression:
                     return target.kind === SyntaxKind.PropertyAccessExpression &&
                         (<PropertyAccessExpression>source).name.text === (<PropertyAccessExpression>target).name.text &&
@@ -11518,6 +11529,7 @@ namespace ts {
                 switch (expr.kind) {
                     case SyntaxKind.Identifier:
                     case SyntaxKind.ThisKeyword:
+                    case SyntaxKind.SuperKeyword:
                     case SyntaxKind.PropertyAccessExpression:
                         return narrowTypeByTruthiness(type, expr, assumeTrue);
                     case SyntaxKind.CallExpression:

@@ -1,11 +1,15 @@
-//// [emitClassDeclarationWithPropertyAccessInHeritageClause1.ts]
-class B {}
-function foo() {
-    return {B: B};
+//// [controlFlowSuperPropertyAccess.ts]
+class B {
+    protected m?(): void;
 }
-class C extends (foo()).B {}
+class C extends B {
+    body() {
+        super.m && super.m();
+    }
+}
 
-//// [emitClassDeclarationWithPropertyAccessInHeritageClause1.js]
+
+//// [controlFlowSuperPropertyAccess.js]
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = Object.setPrototypeOf ||
         ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
@@ -21,13 +25,13 @@ var B = (function () {
     }
     return B;
 }());
-function foo() {
-    return { B: B };
-}
 var C = (function (_super) {
     __extends(C, _super);
     function C() {
         return _super !== null && _super.apply(this, arguments) || this;
     }
+    C.prototype.body = function () {
+        _super.prototype.m && _super.prototype.m.call(this);
+    };
     return C;
-}((foo()).B));
+}(B));
