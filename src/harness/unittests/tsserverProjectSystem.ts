@@ -174,7 +174,7 @@ namespace ts.projectSystem {
             request.type = "request";
             return this.executeCommand(<T>request);
         }
-    };
+    }
 
     export function createSession(host: server.ServerHost, typingsInstaller?: server.ITypingsInstaller, projectServiceEventHandler?: server.ProjectServiceEventHandler, cancellationToken?: server.ServerCancellationToken, throttleWaitMilliseconds?: number) {
         if (typingsInstaller === undefined) {
@@ -381,7 +381,7 @@ namespace ts.projectSystem {
         fileExists(s: string) {
             const path = this.toPath(s);
             return this.fs.contains(path) && isFile(this.fs.get(path));
-        };
+        }
 
         getFileSize(s: string) {
             const path = this.toPath(s);
@@ -476,11 +476,11 @@ namespace ts.projectSystem {
         // TOOD: record and invoke callbacks to simulate timer events
         setTimeout(callback: TimeOutCallback, _time: number, ...args: any[]) {
             return this.timeoutCallbacks.register(callback, args);
-        };
+        }
 
         clearTimeout(timeoutId: any): void {
             this.timeoutCallbacks.unregister(timeoutId);
-        };
+        }
 
         checkTimeoutQueueLength(expected: number) {
             const callbacksCount = this.timeoutCallbacks.count();
@@ -501,7 +501,7 @@ namespace ts.projectSystem {
 
         clearImmediate(timeoutId: any): void {
             this.immediateCallbacks.unregister(timeoutId);
-        };
+        }
 
         createDirectory(directoryName: string): void {
             this.createFileOrFolder({ path: directoryName });
@@ -548,11 +548,11 @@ namespace ts.projectSystem {
     }
 
     /**
-      * Test server cancellation token used to mock host token cancellation requests.
-      * The cancelAfterRequest constructor param specifies how many isCancellationRequested() calls
-      * should be made before canceling the token. The id of the request to cancel should be set with
-      * setRequestToCancel();
-      */
+     * Test server cancellation token used to mock host token cancellation requests.
+     * The cancelAfterRequest constructor param specifies how many isCancellationRequested() calls
+     * should be made before canceling the token. The id of the request to cancel should be set with
+     * setRequestToCancel();
+     */
     export class TestServerCancellationToken implements server.ServerCancellationToken {
         private currentId = -1;
         private requestToCancel = -1;
