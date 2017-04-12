@@ -2852,7 +2852,7 @@ namespace ts {
         containingType?: UnionOrIntersectionType;  // Containing union or intersection type for synthetic property
         leftSpread?: Symbol;                // Left source for synthetic spread property
         rightSpread?: Symbol;               // Right source for synthetic spread property
-        mappedTypeOrigin?: Symbol;          // For a property on a mapped type, points back to the orignal 'T' from 'keyof T'.
+        syntheticOrigin?: Symbol;           // For a property on a mapped or spread type, points back to the original property
         isDiscriminantProperty?: boolean;   // True if discriminant synthetic property
         resolvedExports?: SymbolTable;      // Resolved exports of module
         exportsChecked?: boolean;           // True if exports of external module have been checked
@@ -3937,6 +3937,7 @@ namespace ts {
         CustomPrologue = 1 << 19,                // Treat the statement as if it were a prologue directive (NOTE: Prologue directives are *not* transformed).
         NoHoisting = 1 << 20,                    // Do not hoist this declaration in --module system
         HasEndOfDeclarationMarker = 1 << 21,     // Declaration has an associated NotEmittedStatement to mark the end of the declaration
+        Iterator = 1 << 22,                      // The expression to a `yield*` should be treated as an Iterator when down-leveling, not an Iterable.
     }
 
     export interface EmitHelper {
