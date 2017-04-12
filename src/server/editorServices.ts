@@ -61,6 +61,24 @@ namespace ts.server {
         "smart": IndentStyle.Smart
     });
 
+    /**
+     * How to understand this block:
+     *  * The 'match' property is a regexp that matches a filename.
+     *  * If 'match' is successful, then:
+     *     * All files from 'exclude' are removed from the project. See below.
+     *     * All 'types' are included in ATA
+     *  * What the heck is 'exclude' ?
+     *     * An array of an array of strings and numbers
+     *     * Each array is:
+     *       * An array of strings and numbers
+     *       * The strings are literals
+     *       * The numbers refer to capture group indices from the 'match' regexp
+     *          * Remember that '1' is the first group
+     *       * These are concatenated together to form a new regexp
+     *       * Filenames matching these regexps are excluded from the project
+     * This default value is tested in tsserverProjectSystem.ts; add tests there
+     *   if you are changing this so that you can be sure your regexp works!
+     */
     const defaultTypeSafeList: SafeList = {
         "jquery": {
             // jquery files can have names like "jquery-1.10.2.min.js" (or "jquery.intellisense.js")
@@ -84,6 +102,11 @@ namespace ts.server {
             "match": /^(.*\/office\/1)\/excel-\d+\.debug\.js$/i, // Office NuGet package is installed under a "1/office" folder
             "exclude": [["^", 1, "/.*"]],                     // Exclude that whole folder if the file indicated above is found in it
             "types": ["office"]                               // @types package to fetch instead
+        },
+        "Minified files": {
+            // e.g. /whatever/blah.min.js
+            "match": /^(.+\.min\.js)$/i,
+            "exclude": [["^", 1, "$"]]
         }
     };
 
@@ -643,18 +666,23 @@ namespace ts.server {
                     // when creation inferred project for some file has added other open files into this project (i.e. as referenced files)
                     // we definitely don't want to delete the project that was just created
                     for (const f of this.openFiles) {
-                        if (f.containingProjects.length === 0) {
+                        if (f.containingProjects.length === 0 || !inferredProject.containsScriptInfo(f)) {
                             // this is orphaned file that we have not processed yet - skip it
                             continue;
                         }
-                        const defaultProject = f.getDefaultProject();
-                        if (isRootFileInInferredProject(info) && defaultProject !== inferredProject && inferredProject.containsScriptInfo(f)) {
-                            // open file used to be root in inferred project,
-                            // this inferred project is different from the one we've just created for current file
-                            // and new inferred project references this open file.
-                            // We should delete old inferred project and attach open file to the new one
-                            this.removeProject(defaultProject);
-                            f.attachToProject(inferredProject);
+
+                        for (const fContainingProject of f.containingProjects) {
+                            if (fContainingProject.projectKind === ProjectKind.Inferred &&
+                                fContainingProject.isRoot(f) &&
+                                fContainingProject !== inferredProject) {
+
+                                // open file used to be root in inferred project,
+                                // this inferred project is different from the one we've just created for current file
+                                // and new inferred project references this open file.
+                                // We should delete old inferred project and attach open file to the new one
+                                this.removeProject(fContainingProject);
+                                f.attachToProject(inferredProject);
+                            }
                         }
                     }
                 }
@@ -1091,7 +1119,7 @@ namespace ts.server {
             const { success, projectOptions, configFileErrors } = this.convertConfigFileContentToProjectOptions(project.getConfigFilePath());
             if (!success) {
                 // reset project settings to default
-                this.updateNonInferredProject(project, [], fileNamePropertyReader, {}, {}, /*compileOnSave*/false, configFileErrors);
+                this.updateNonInferredProject(project, [], fileNamePropertyReader, {}, {}, /*compileOnSave*/ false, configFileErrors);
                 return configFileErrors;
             }
 
@@ -1507,7 +1535,7 @@ namespace ts.server {
 
                 // Copy back this field into the project if needed
                 if (types.length > 0) {
-                    proj.typeAcquisition = proj.typeAcquisition || { };
+                    proj.typeAcquisition = proj.typeAcquisition || {};
                     proj.typeAcquisition.include = types;
                 }
             }
