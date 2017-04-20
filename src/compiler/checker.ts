@@ -574,7 +574,7 @@ namespace ts {
                 recordMergedSymbol(target, source);
             }
             else if (target.flags & SymbolFlags.NamespaceModule) {
-                error(source.valueDeclaration.name, Diagnostics.Cannot_augment_module_0_with_value_exports_because_it_resolves_to_a_non_module_entity, symbolToString(target));
+                error(source.declarations[0].name, Diagnostics.Cannot_augment_module_0_with_value_exports_because_it_resolves_to_a_non_module_entity, symbolToString(target));
             }
             else {
                 const message = target.flags & SymbolFlags.BlockScopedVariable || source.flags & SymbolFlags.BlockScopedVariable
@@ -19703,7 +19703,7 @@ namespace ts {
             }
 
             let iteratorMethodSignatures: Signature[];
-            let mayBeIterable = false;
+            let isNonAsyncIterable = false;
             if (isAsyncIterable) {
                 const iteratorMethod = getTypeOfPropertyOfType(type, getPropertyNameForKnownSymbolName("asyncIterator"));
                 if (isTypeAny(iteratorMethod)) {
@@ -19718,17 +19718,17 @@ namespace ts {
                     return undefined;
                 }
                 iteratorMethodSignatures = iteratorMethod && getSignaturesOfType(iteratorMethod, SignatureKind.Call);
-                mayBeIterable = true;
+                isNonAsyncIterable = true;
             }
 
             if (some(iteratorMethodSignatures)) {
                 const iteratorMethodReturnType = getUnionType(map(iteratorMethodSignatures, getReturnTypeOfSignature), /*subtypeReduction*/ true);
-                const iteratedType = getIteratedTypeOfIterator(iteratorMethodReturnType, errorNode, /*isAsyncIterator*/ false);
+                const iteratedType = getIteratedTypeOfIterator(iteratorMethodReturnType, errorNode, /*isAsyncIterator*/ !isNonAsyncIterable);
                 if (checkAssignability && errorNode && iteratedType) {
                     // If `checkAssignability` was specified, we were called from
                     // `checkIteratedTypeOrElementType`. As such, we need to validate that
                     // the type passed in is actually an Iterable.
-                    checkTypeAssignableTo(type, mayBeIterable
+                    checkTypeAssignableTo(type, isNonAsyncIterable
                         ? createIterableType(iteratedType)
                         : createAsyncIterableType(iteratedType), errorNode);
                 }
