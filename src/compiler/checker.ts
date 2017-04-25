@@ -1641,10 +1641,14 @@ namespace ts {
                     error(errorNode, diag, moduleReference, resolvedModule.resolvedFileName);
                 }
                 else if (noImplicitAny && moduleNotFoundError) {
-                    error(errorNode,
+                    let errorInfo = chainDiagnosticMessages(/*details*/ undefined,
+                        Diagnostics.Try_npm_install_types_Slash_0_if_it_exists_or_add_a_new_declaration_d_ts_file_containing_declare_module_0,
+                        moduleReference);
+                    errorInfo = chainDiagnosticMessages(errorInfo,
                         Diagnostics.Could_not_find_a_declaration_file_for_module_0_1_implicitly_has_an_any_type,
                         moduleReference,
                         resolvedModule.resolvedFileName);
+                    diagnostics.add(createDiagnosticForNodeFromMessageChain(errorNode, errorInfo));
                 }
                 // Failed imports and untyped modules are both treated in an untyped manner; only difference is whether we give a diagnostic first.
                 return undefined;
@@ -11565,7 +11569,7 @@ namespace ts {
                 }
 
                 if (isIdentifierTypePredicate(predicate)) {
-                    const predicateArgument = callExpression.arguments[predicate.parameterIndex];
+                    const predicateArgument = callExpression.arguments[predicate.parameterIndex - (signature.thisParameter ? 1 : 0)];
                     if (predicateArgument) {
                         if (isMatchingReference(reference, predicateArgument)) {
                             return getNarrowedType(type, predicate.type, assumeTrue, isTypeSubtypeOf);
@@ -11807,7 +11811,7 @@ namespace ts {
             // the entire control flow graph from the variable's declaration (i.e. when the flow container and
             // declaration container are the same).
             const assumeInitialized = isParameter || isOuterVariable ||
-                type !== autoType && type !== autoArrayType && (!strictNullChecks || (type.flags & TypeFlags.Any) !== 0 || isInTypeQuery(node)) ||
+                type !== autoType && type !== autoArrayType && (!strictNullChecks || (type.flags & TypeFlags.Any) !== 0 || isInTypeQuery(node) || node.parent.kind === SyntaxKind.ExportSpecifier) ||
                 isInAmbientContext(declaration);
             const initialType = assumeInitialized ? (isParameter ? removeOptionalityFromDeclaredType(type, getRootDeclaration(declaration) as VariableLikeDeclaration) : type) :
                 type === autoType || type === autoArrayType ? undefinedType :
@@ -12728,6 +12732,8 @@ namespace ts {
                 case SyntaxKind.PropertyAssignment:
                 case SyntaxKind.ShorthandPropertyAssignment:
                     return getContextualTypeForObjectLiteralElement(<ObjectLiteralElementLike>parent);
+                case SyntaxKind.SpreadAssignment:
+                    return getApparentTypeOfContextualType(parent.parent as ObjectLiteralExpression);
                 case SyntaxKind.ArrayLiteralExpression:
                     return getContextualTypeForElementExpression(node);
                 case SyntaxKind.ConditionalExpression:
