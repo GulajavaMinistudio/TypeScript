@@ -737,7 +737,8 @@ namespace ts {
             const useFile = getSourceFileOfNode(usage);
             if (declarationFile !== useFile) {
                 if ((modulekind && (declarationFile.externalModuleIndicator || useFile.externalModuleIndicator)) ||
-                    (!compilerOptions.outFile && !compilerOptions.out)) {
+                    (!compilerOptions.outFile && !compilerOptions.out) ||
+                    isInAmbientContext(declaration)) {
                     // nodes are in different files and order cannot be determined
                     return true;
                 }
@@ -12754,7 +12755,7 @@ namespace ts {
          * @param node the expression whose contextual type will be returned.
          * @returns the contextual type of an expression.
          */
-        function getContextualType(node: Expression): Type {
+        function getContextualType(node: Expression): Type | undefined {
             if (isInsideWithStatementBody(node)) {
                 // We cannot answer semantic questions within a with block, do not proceed any further
                 return undefined;
