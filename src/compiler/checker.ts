@@ -205,6 +205,7 @@ namespace ts {
                 return tryFindAmbientModule(moduleName, /*withAugmentations*/ false);
             },
             getApparentType,
+            getAllPossiblePropertiesOfType,
             getSuggestionForNonexistentProperty,
             getSuggestionForNonexistentSymbol,
             getBaseConstraintOfType,
@@ -4158,6 +4159,7 @@ namespace ts {
             const types: Type[] = [];
             let definedInConstructor = false;
             let definedInMethod = false;
+            let jsDocType: Type;
             for (const declaration of symbol.declarations) {
                 const expression = declaration.kind === SyntaxKind.BinaryExpression ? <BinaryExpression>declaration :
                     declaration.kind === SyntaxKind.PropertyAccessExpression ? <BinaryExpression>getAncestor(declaration, SyntaxKind.BinaryExpression) :
@@ -4176,19 +4178,26 @@ namespace ts {
                     }
                 }
 
-                if (expression.flags & NodeFlags.JavaScriptFile) {
-                    // If there is a JSDoc type, use it
-                    const type = getTypeForDeclarationFromJSDocComment(expression.parent);
-                    if (type && type !== unknownType) {
-                        types.push(getWidenedType(type));
-                        continue;
+                // If there is a JSDoc type, use it
+                const type = getTypeForDeclarationFromJSDocComment(expression.parent);
+                if (type) {
+                    const declarationType = getWidenedType(type);
+                    if (!jsDocType) {
+                        jsDocType = declarationType;
+                    }
+                    else if (jsDocType !== unknownType && declarationType !== unknownType && !isTypeIdenticalTo(jsDocType, declarationType)) {
+                        const name = getNameOfDeclaration(declaration);
+                        error(name, Diagnostics.Subsequent_variable_declarations_must_have_the_same_type_Variable_0_must_be_of_type_1_but_here_has_type_2, declarationNameToString(name), typeToString(jsDocType), typeToString(declarationType));
                     }
                 }
-
-                types.push(getWidenedLiteralType(checkExpressionCached(expression.right)));
+                else if (!jsDocType) {
+                    // If we don't have an explicit JSDoc type, get the type from the expression.
+                    types.push(getWidenedLiteralType(checkExpressionCached(expression.right)));
+                }
             }
 
-            return getWidenedType(addOptionality(getUnionType(types, /*subtypeReduction*/ true), definedInMethod && !definedInConstructor));
+            const type = jsDocType || getUnionType(types, /*subtypeReduction*/ true);
+            return getWidenedType(addOptionality(type, definedInMethod && !definedInConstructor));
         }
 
         // Return the type implied by a binding pattern element. This is the type of the initializer of the element if
@@ -5685,6 +5694,22 @@ namespace ts {
             return type.flags & TypeFlags.UnionOrIntersection ?
                 getPropertiesOfUnionOrIntersectionType(<UnionType>type) :
                 getPropertiesOfObjectType(type);
+        }
+
+        function getAllPossiblePropertiesOfType(type: Type): Symbol[] {
+            if (type.flags & TypeFlags.Union) {
+                const props = createMap<Symbol>();
+                for (const memberType of (type as UnionType).types) {
+                    for (const { name } of getPropertiesOfType(memberType)) {
+                        if (!props.has(name)) {
+                            props.set(name, createUnionOrIntersectionProperty(type as UnionType, name));
+                        }
+                    }
+                }
+                return arrayFrom(props.values());
+            } else {
+                return getPropertiesOfType(type);
+            }
         }
 
         function getConstraintOfType(type: TypeVariable | UnionOrIntersectionType): Type {
@@ -13229,7 +13254,7 @@ namespace ts {
                 }
                 return result;
             }
-       }
+        }
 
         function isValidSpreadType(type: Type): boolean {
             return !!(type.flags & (TypeFlags.Any | TypeFlags.Null | TypeFlags.Undefined | TypeFlags.NonPrimitive) ||
@@ -13549,6 +13574,20 @@ namespace ts {
             return _jsxElementChildrenPropertyName;
         }
 
+        function getApparentTypeOfJsxPropsType(propsType: Type): Type {
+            if (!propsType) {
+                return undefined;
+            }
+            if (propsType.flags & TypeFlags.Intersection) {
+                const propsApparentType: Type[] = [];
+                for (const t of (<UnionOrIntersectionType>propsType).types) {
+                    propsApparentType.push(getApparentType(t));
+                }
+                return getIntersectionType(propsApparentType);
+            }
+            return getApparentType(propsType);
+        }
+
         /**
          * Get JSX attributes type by trying to resolve openingLikeElement as a stateless function component.
          * Return only attributes type of successfully resolved call signature.
@@ -13569,6 +13608,7 @@ namespace ts {
                     if (callSignature !== unknownSignature) {
                         const callReturnType = callSignature && getReturnTypeOfSignature(callSignature);
                         let paramType = callReturnType && (callSignature.parameters.length === 0 ? emptyObjectType : getTypeOfSymbol(callSignature.parameters[0]));
+                        paramType = getApparentTypeOfJsxPropsType(paramType);
                         if (callReturnType && isTypeAssignableTo(callReturnType, jsxStatelessElementType)) {
                             // Intersect in JSX.IntrinsicAttributes if it exists
                             const intrinsicAttributes = getJsxType(JsxNames.IntrinsicAttributes);
@@ -13606,7 +13646,8 @@ namespace ts {
                     let allMatchingAttributesType: Type;
                     for (const candidate of candidatesOutArray) {
                         const callReturnType = getReturnTypeOfSignature(candidate);
-                        const paramType = callReturnType && (candidate.parameters.length === 0 ? emptyObjectType : getTypeOfSymbol(candidate.parameters[0]));
+                        let paramType = callReturnType && (candidate.parameters.length === 0 ? emptyObjectType : getTypeOfSymbol(candidate.parameters[0]));
+                        paramType = getApparentTypeOfJsxPropsType(paramType);
                         if (callReturnType && isTypeAssignableTo(callReturnType, jsxStatelessElementType)) {
                             let shouldBeCandidate = true;
                             for (const attribute of openingLikeElement.attributes.properties) {
