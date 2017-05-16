@@ -11,12 +11,12 @@ namespace ts {
         isTypeReferenceDirective?: boolean;
     }
 
-    export function getDeclarationOfKind(symbol: Symbol, kind: SyntaxKind): Declaration {
+    export function getDeclarationOfKind<T extends Declaration>(symbol: Symbol, kind: T["kind"]): T {
         const declarations = symbol.declarations;
         if (declarations) {
             for (const declaration of declarations) {
                 if (declaration.kind === kind) {
-                    return declaration;
+                    return declaration as T;
                 }
             }
         }
@@ -4008,6 +4008,10 @@ namespace ts {
 
     export function isImportEqualsDeclaration(node: Node): node is ImportEqualsDeclaration {
         return node.kind === SyntaxKind.ImportEqualsDeclaration;
+    }
+
+    export function isImportDeclaration(node: Node): node is ImportDeclaration {
+        return node.kind === SyntaxKind.ImportDeclaration;
     }
 
     export function isImportClause(node: Node): node is ImportClause {
