@@ -479,24 +479,11 @@ namespace FourSlash {
         }
 
         private getDiagnostics(fileName: string): ts.Diagnostic[] {
-            const syntacticErrors = this.languageService.getSyntacticDiagnostics(fileName);
-            const semanticErrors = this.languageService.getSemanticDiagnostics(fileName);
-
-            const diagnostics: ts.Diagnostic[] = [];
-            diagnostics.push.apply(diagnostics, syntacticErrors);
-            diagnostics.push.apply(diagnostics, semanticErrors);
-
-            return diagnostics;
+            return this.languageService.getSyntacticDiagnostics(fileName).concat(this.languageService.getSemanticDiagnostics(fileName));
         }
 
         private getAllDiagnostics(): ts.Diagnostic[] {
-            const diagnostics: ts.Diagnostic[] = [];
-
-            for (const fileName of this.languageServiceAdapterHost.getFilenames()) {
-                diagnostics.push.apply(this.getDiagnostics(fileName));
-            }
-
-            return diagnostics;
+            return ts.flatMap(this.languageServiceAdapterHost.getFilenames(), fileName => this.getDiagnostics(fileName));
         }
 
         public verifyErrorExistsAfterMarker(markerName: string, negative: boolean, after: boolean) {
@@ -2385,7 +2372,10 @@ namespace FourSlash {
             const codeFixes = this.getCodeFixActions(this.activeFile.fileName, errorCode);
 
             if (!codeFixes || codeFixes.length === 0) {
-                this.raiseError("No codefixes returned.");
+                if (expectedTextArray.length !== 0) {
+                    this.raiseError("No codefixes returned.");
+                }
+                return;
             }
 
             const actualTextArray: string[] = [];
