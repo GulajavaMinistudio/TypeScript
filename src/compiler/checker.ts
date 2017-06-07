@@ -1473,8 +1473,15 @@ namespace ts {
             }
         }
 
+        /**
+         * Indicates that a symbol is an alias that does not merge with a local declaration.
+         */
+        function isNonLocalAlias(symbol: Symbol, excludes = SymbolFlags.Value | SymbolFlags.Type | SymbolFlags.Namespace) {
+            return symbol && (symbol.flags & (SymbolFlags.Alias | excludes)) === SymbolFlags.Alias;
+        }
+
         function resolveSymbol(symbol: Symbol, dontResolveAlias?: boolean): Symbol {
-            const shouldResolve = !dontResolveAlias && symbol && symbol.flags & SymbolFlags.Alias && !(symbol.flags & (SymbolFlags.Value | SymbolFlags.Type | SymbolFlags.Namespace));
+            const shouldResolve = !dontResolveAlias && isNonLocalAlias(symbol);
             return shouldResolve ? resolveAlias(symbol) : symbol;
         }
 
@@ -10254,7 +10261,7 @@ namespace ts {
             const objectFlags = getObjectFlags(type);
             return !!(type.flags & TypeFlags.TypeVariable ||
                 objectFlags & ObjectFlags.Reference && forEach((<TypeReference>type).typeArguments, couldContainTypeVariables) ||
-                objectFlags & ObjectFlags.Anonymous && type.symbol && type.symbol.flags & (SymbolFlags.Method | SymbolFlags.TypeLiteral | SymbolFlags.Class) ||
+                objectFlags & ObjectFlags.Anonymous && type.symbol && type.symbol.flags & (SymbolFlags.Function | SymbolFlags.Method | SymbolFlags.TypeLiteral | SymbolFlags.Class) ||
                 objectFlags & ObjectFlags.Mapped ||
                 type.flags & TypeFlags.UnionOrIntersection && couldUnionOrIntersectionContainTypeVariables(<UnionOrIntersectionType>type));
         }
@@ -12020,7 +12027,9 @@ namespace ts {
                 return getTypeOfSymbol(symbol);
             }
 
-            if (symbol.flags & SymbolFlags.Alias && !isInTypeQuery(node) && !isConstEnumOrConstEnumOnlyModule(resolveAlias(symbol))) {
+            // We should only mark aliases as referenced if there isn't a local value declaration
+            // for the symbol.
+            if (isNonLocalAlias(symbol, /*excludes*/ SymbolFlags.Value) && !isInTypeQuery(node) && !isConstEnumOrConstEnumOnlyModule(resolveAlias(symbol))) {
                 markAliasSymbolAsReferenced(symbol);
             }
 
@@ -13057,13 +13066,13 @@ namespace ts {
             return node ? node.contextualMapper : identityMapper;
         }
 
-        // If the given type is an object or union type, if that type has a single signature, and if
-        // that signature is non-generic, return the signature. Otherwise return undefined.
-        function getNonGenericSignature(type: Type, node: FunctionExpression | ArrowFunction | MethodDeclaration): Signature {
+        // If the given type is an object or union type with a single signature, and if that signature has at
+        // least as many parameters as the given function, return the signature. Otherwise return undefined.
+        function getContextualCallSignature(type: Type, node: FunctionExpression | ArrowFunction | MethodDeclaration): Signature {
             const signatures = getSignaturesOfStructuredType(type, SignatureKind.Call);
             if (signatures.length === 1) {
                 const signature = signatures[0];
-                if (!signature.typeParameters && !isAritySmaller(signature, node)) {
+                if (!isAritySmaller(signature, node)) {
                     return signature;
                 }
             }
@@ -13114,12 +13123,12 @@ namespace ts {
                 return undefined;
             }
             if (!(type.flags & TypeFlags.Union)) {
-                return getNonGenericSignature(type, node);
+                return getContextualCallSignature(type, node);
             }
             let signatureList: Signature[];
             const types = (<UnionType>type).types;
             for (const current of types) {
-                const signature = getNonGenericSignature(current, node);
+                const signature = getContextualCallSignature(current, node);
                 if (signature) {
                     if (!signatureList) {
                         // This signature will contribute to contextual union signature
@@ -14979,11 +14988,21 @@ namespace ts {
                     // We clone the contextual mapper to avoid disturbing a resolution in progress for an
                     // outer call expression. Effectively we just want a snapshot of whatever has been
                     // inferred for any outer call expression so far.
-                    const mapper = cloneTypeMapper(getContextualMapper(node));
-                    const instantiatedType = instantiateType(contextualType, mapper);
-                    const returnType = getReturnTypeOfSignature(signature);
-                    // Inferences made from return types have lower priority than all other inferences.
-                    inferTypes(context.inferences, instantiatedType, returnType, InferencePriority.ReturnType);
+                    const instantiatedType = instantiateType(contextualType, cloneTypeMapper(getContextualMapper(node)));
+                    // If the contextual type is a generic pure function type, we instantiate the type with
+                    // its own type parameters and type arguments. This ensures that the type parameters are
+                    // not erased to type any during type inference such that they can be inferred as actual
+                    // types from the contextual type. For example:
+                    //   declare function arrayMap<T, U>(f: (x: T) => U): (a: T[]) => U[];
+                    //   const boxElements: <A>(a: A[]) => { value: A }[] = arrayMap(value => ({ value }));
+                    // Above, the type of the 'value' parameter is inferred to be 'A'.
+                    const contextualSignature = getSingleCallSignature(instantiatedType);
+                    const inferenceSourceType = contextualSignature && contextualSignature.typeParameters ?
+                        getOrCreateTypeFromSignature(getSignatureInstantiation(contextualSignature, contextualSignature.typeParameters)) :
+                        instantiatedType;
+                    const inferenceTargetType = getReturnTypeOfSignature(signature);
+                     // Inferences made from return types have lower priority than all other inferences.
+                    inferTypes(context.inferences, inferenceSourceType, inferenceTargetType, InferencePriority.ReturnType);
                 }
             }
 
@@ -16812,8 +16831,9 @@ namespace ts {
                     (expr as PropertyAccessExpression | ElementAccessExpression).expression.kind === SyntaxKind.ThisKeyword) {
                     // Look for if this is the constructor for the class that `symbol` is a property of.
                     const func = getContainingFunction(expr);
-                    if (!(func && func.kind === SyntaxKind.Constructor))
+                    if (!(func && func.kind === SyntaxKind.Constructor)) {
                         return true;
+                    }
                     // If func.parent is a class and symbol is a (readonly) property of that class, or
                     // if func is a constructor and symbol is a (readonly) parameter property declared in it,
                     // then symbol is writeable here.
@@ -21845,6 +21865,10 @@ namespace ts {
                     if (moduleSymbol && hasExportAssignmentSymbol(moduleSymbol)) {
                         error(node.moduleSpecifier, Diagnostics.Module_0_uses_export_and_cannot_be_used_with_export_Asterisk, symbolToString(moduleSymbol));
                     }
+
+                    if (modulekind !== ModuleKind.System && modulekind !== ModuleKind.ES2015) {
+                        checkExternalEmitHelpers(node, ExternalEmitHelpers.ExportStar);
+                    }
                 }
             }
         }
@@ -22926,7 +22950,9 @@ namespace ts {
             node = getParseTreeNode(node, isIdentifier);
             if (node) {
                 const symbol = getReferencedValueSymbol(node);
-                if (symbol && symbol.flags & SymbolFlags.Alias) {
+                // We should only get the declaration of an alias if there isn't a local value
+                // declaration for the symbol
+                if (isNonLocalAlias(symbol, /*excludes*/ SymbolFlags.Value)) {
                     return getDeclarationOfAliasSymbol(symbol);
                 }
             }
@@ -23517,7 +23543,8 @@ namespace ts {
                 case ExternalEmitHelpers.AsyncGenerator: return "__asyncGenerator";
                 case ExternalEmitHelpers.AsyncDelegator: return "__asyncDelegator";
                 case ExternalEmitHelpers.AsyncValues: return "__asyncValues";
-                default: Debug.fail("Unrecognized helper.");
+                case ExternalEmitHelpers.ExportStar: return "__exportStar";
+                default: Debug.fail("Unrecognized helper");
             }
         }
 
