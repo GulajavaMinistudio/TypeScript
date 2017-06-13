@@ -1448,7 +1448,7 @@ namespace ts {
         return node && firstOrUndefined(getJSDocTags(node, kind));
     }
 
-   export function getJSDocs(node: Node): (JSDoc | JSDocTag)[] {
+    export function getJSDocs(node: Node): (JSDoc | JSDocTag)[] {
         if (isJSDocTypedefTag(node)) {
             return [node.parent];
         }
@@ -1627,7 +1627,7 @@ namespace ts {
                     return unaryOperator === SyntaxKind.PlusPlusToken || unaryOperator === SyntaxKind.MinusMinusToken ? AssignmentKind.Compound : AssignmentKind.None;
                 case SyntaxKind.ForInStatement:
                 case SyntaxKind.ForOfStatement:
-                    return (<ForInStatement | ForOfStatement>parent).initializer === node ? AssignmentKind.Definite : AssignmentKind.None;
+                    return (<ForInOrOfStatement>parent).initializer === node ? AssignmentKind.Definite : AssignmentKind.None;
                 case SyntaxKind.ParenthesizedExpression:
                 case SyntaxKind.ArrayLiteralExpression:
                 case SyntaxKind.SpreadElement:
@@ -2740,6 +2740,20 @@ namespace ts {
         }
         if (node.flags & NodeFlags.JavaScriptFile) {
             return getJSDocReturnType(node);
+        }
+    }
+
+    /**
+     * Gets the effective type parameters. If the node was parsed in a
+     * JavaScript file, gets the type parameters from the `@template` tag from JSDoc.
+     */
+    export function getEffectiveTypeParameterDeclarations(node: DeclarationWithTypeParameters): TypeParameterDeclaration[] {
+        if (node.typeParameters) {
+            return node.typeParameters;
+        }
+        if (node.flags & NodeFlags.JavaScriptFile) {
+            const templateTag = getJSDocTemplateTag(node);
+            return templateTag && templateTag.typeParameters;
         }
     }
 
@@ -4098,7 +4112,7 @@ namespace ts {
 
     // Signature elements
 
-    export function isTypeParameter(node: Node): node is TypeParameterDeclaration {
+    export function isTypeParameterDeclaration(node: Node): node is TypeParameterDeclaration {
         return node.kind === SyntaxKind.TypeParameter;
     }
 
@@ -5150,6 +5164,11 @@ namespace ts {
         }
 
         return false;
+    }
+
+    /* @internal */
+    export function isForInOrOfStatement(node: Node): node is ForInOrOfStatement {
+        return node.kind === SyntaxKind.ForInStatement || node.kind === SyntaxKind.ForOfStatement;
     }
 
     // Element
