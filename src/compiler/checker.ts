@@ -4826,12 +4826,9 @@ namespace ts {
         }
 
         function getInstantiatedConstructorsForTypeArguments(type: Type, typeArgumentNodes: TypeNode[], location: Node): Signature[] {
-            let signatures = getConstructorsForTypeArguments(type, typeArgumentNodes, location);
-            if (typeArgumentNodes) {
-                const typeArguments = map(typeArgumentNodes, getTypeFromTypeNode);
-                signatures = map(signatures, sig => getSignatureInstantiation(sig, typeArguments));
-            }
-            return signatures;
+            const signatures = getConstructorsForTypeArguments(type, typeArgumentNodes, location);
+            const typeArguments = map(typeArgumentNodes, getTypeFromTypeNode);
+            return sameMap(signatures, sig => some(sig.typeParameters) ? getSignatureInstantiation(sig, typeArguments) : sig);
         }
 
         /**
@@ -7719,7 +7716,7 @@ namespace ts {
                         const declarations: Declaration[] = concatenate(leftProp.declarations, rightProp.declarations);
                         const flags = SymbolFlags.Property | (leftProp.flags & SymbolFlags.Optional);
                         const result = createSymbol(flags, leftProp.name);
-                        result.type = getUnionType([getTypeOfSymbol(leftProp), rightType]);
+                        result.type = getUnionType([getTypeOfSymbol(leftProp), getTypeWithFacts(rightType, TypeFacts.NEUndefined)]);
                         result.leftSpread = leftProp;
                         result.rightSpread = rightProp;
                         result.declarations = declarations;
@@ -14593,12 +14590,31 @@ namespace ts {
                 ? (<PropertyAccessExpression>node).expression
                 : (<QualifiedName>node).left;
 
-            const type = checkExpression(left);
+            return isValidPropertyAccessWithType(node, left, propertyName, getWidenedType(checkExpression(left)));
+        }
+
+        function isValidPropertyAccessWithType(
+            node: PropertyAccessExpression | QualifiedName,
+            left: LeftHandSideExpression | QualifiedName,
+            propertyName: string,
+            type: Type): boolean {
+
             if (type !== unknownType && !isTypeAny(type)) {
-                const prop = getPropertyOfType(getWidenedType(type), propertyName);
+                const prop = getPropertyOfType(type, propertyName);
                 if (prop) {
                     return checkPropertyAccessibility(node, left, type, prop);
                 }
+
+                // In js files properties of unions are allowed in completion
+                if (isInJavaScriptFile(left) && (type.flags & TypeFlags.Union)) {
+                    for (const elementType of (<UnionType>type).types) {
+                        if (isValidPropertyAccessWithType(node, left, propertyName, elementType)) {
+                            return true;
+                        }
+                    }
+                }
+
+                return false;
             }
             return true;
         }
@@ -20927,7 +20943,7 @@ namespace ts {
                     const staticBaseType = getApparentType(baseConstructorType);
                     checkBaseTypeAccessibility(staticBaseType, baseTypeNode);
                     checkSourceElement(baseTypeNode.expression);
-                    if (baseTypeNode.typeArguments) {
+                    if (some(baseTypeNode.typeArguments)) {
                         forEach(baseTypeNode.typeArguments, checkSourceElement);
                         for (const constructor of getConstructorsForTypeArguments(staticBaseType, baseTypeNode.typeArguments, baseTypeNode)) {
                             if (!checkTypeArgumentConstraints(constructor.typeParameters, baseTypeNode.typeArguments)) {
@@ -23910,6 +23926,11 @@ namespace ts {
                 const sourceFile = getSourceFileOfNode(node);
                 return grammarErrorAtPos(sourceFile, types.pos, 0, Diagnostics._0_list_cannot_be_empty, listType);
             }
+            return forEach(types, checkGrammarExpressionWithTypeArguments);
+        }
+
+        function checkGrammarExpressionWithTypeArguments(node: ExpressionWithTypeArguments) {
+            return checkGrammarTypeArguments(node, node.typeArguments);
         }
 
         function checkGrammarClassDeclarationHeritageClauses(node: ClassLikeDeclaration) {
