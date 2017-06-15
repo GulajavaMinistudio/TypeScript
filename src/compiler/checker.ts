@@ -27,6 +27,12 @@ namespace ts {
         return symbol.id;
     }
 
+    export function isInstantiatedModule(node: ModuleDeclaration, preserveConstEnums: boolean) {
+        const moduleState = getModuleInstanceState(node);
+        return moduleState === ModuleInstanceState.Instantiated ||
+            (preserveConstEnums && moduleState === ModuleInstanceState.ConstEnumOnly);
+    }
+
     export function createTypeChecker(host: TypeCheckerHost, produceDiagnostics: boolean): TypeChecker {
         // Cancellation that controls whether or not we can cancel in the middle of type checking.
         // In general cancelling is *not* safe for the type checker.  We might be in the middle of
@@ -8955,7 +8961,9 @@ namespace ts {
                                     reportError(Diagnostics.Property_0_does_not_exist_on_type_1, symbolToString(prop), typeToString(target));
                                 }
                                 else {
-                                    if (prop.valueDeclaration) {
+                                    // use the property's value declaration if the property is assigned inside the literal itself
+                                    const objectLiteralDeclaration = source.symbol && firstOrUndefined(source.symbol.declarations);
+                                    if (prop.valueDeclaration && findAncestor(prop.valueDeclaration, d => d === objectLiteralDeclaration)) {
                                         errorNode = prop.valueDeclaration;
                                     }
                                     reportError(Diagnostics.Object_literal_may_only_specify_known_properties_and_0_does_not_exist_in_type_1,
@@ -24690,15 +24698,15 @@ namespace ts {
                 return grammarErrorOnNode(node, Diagnostics.Dynamic_import_cannot_have_type_arguments);
             }
 
-            const arguments = node.arguments;
-            if (arguments.length !== 1) {
+            const nodeArguments = node.arguments;
+            if (nodeArguments.length !== 1) {
                 return grammarErrorOnNode(node, Diagnostics.Dynamic_import_must_have_one_specifier_as_an_argument);
             }
 
             // see: parseArgumentOrArrayLiteralElement...we use this function which parse arguments of callExpression to parse specifier for dynamic import.
             // parseArgumentOrArrayLiteralElement allows spread element to be in an argument list which is not allowed as specifier in dynamic import.
-            if (isSpreadElement(arguments[0])) {
-                return grammarErrorOnNode(arguments[0], Diagnostics.Specifier_of_dynamic_import_cannot_be_spread_element);
+            if (isSpreadElement(nodeArguments[0])) {
+                return grammarErrorOnNode(nodeArguments[0], Diagnostics.Specifier_of_dynamic_import_cannot_be_spread_element);
             }
         }
     }
