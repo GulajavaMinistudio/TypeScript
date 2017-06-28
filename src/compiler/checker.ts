@@ -8524,7 +8524,7 @@ namespace ts {
                     }
                     else if (isIdentifierTypePredicate(target.typePredicate)) {
                         if (reportErrors) {
-                            errorReporter(Diagnostics.Signature_0_must_have_a_type_predicate, signatureToString(source));
+                            errorReporter(Diagnostics.Signature_0_must_be_a_type_predicate, signatureToString(source));
                         }
                         return Ternary.False;
                     }
@@ -19470,6 +19470,9 @@ namespace ts {
                         case SyntaxKind.ConstructorType:
                             checkUnusedTypeParameters(<FunctionLikeDeclaration>node);
                             break;
+                        case SyntaxKind.TypeAliasDeclaration:
+                            checkUnusedTypeParameters(<TypeAliasDeclaration>node);
+                            break;
                     }
                 }
             }
@@ -19547,7 +19550,7 @@ namespace ts {
             }
         }
 
-        function checkUnusedTypeParameters(node: ClassDeclaration | ClassExpression | FunctionDeclaration | MethodDeclaration | FunctionExpression | ArrowFunction | ConstructorDeclaration | SignatureDeclaration | InterfaceDeclaration) {
+        function checkUnusedTypeParameters(node: ClassDeclaration | ClassExpression | FunctionDeclaration | MethodDeclaration | FunctionExpression | ArrowFunction | ConstructorDeclaration | SignatureDeclaration | InterfaceDeclaration | TypeAliasDeclaration) {
             if (compilerOptions.noUnusedLocals && !isInAmbientContext(node)) {
                 if (node.typeParameters) {
                     // Only report errors on the last declaration for the type parameter container;
@@ -21252,6 +21255,7 @@ namespace ts {
             checkTypeNameIsReserved(node.name, Diagnostics.Type_alias_name_cannot_be_0);
             checkTypeParameters(node.typeParameters);
             checkSourceElement(node.type);
+            registerForUnusedIdentifiersCheck(node);
         }
 
         function computeEnumMemberValues(node: EnumDeclaration) {
@@ -23262,10 +23266,10 @@ namespace ts {
             // this variable and functions that use it are deliberately moved here from the outer scope
             // to avoid scope pollution
             const resolvedTypeReferenceDirectives = host.getResolvedTypeReferenceDirectives();
-            let fileToDirective: FileMap<string>;
+            let fileToDirective: Map<string>;
             if (resolvedTypeReferenceDirectives) {
                 // populate reverse mapping: file path -> type reference directive that was resolved to this file
-                fileToDirective = createFileMap<string>();
+                fileToDirective = createMap<string>();
                 resolvedTypeReferenceDirectives.forEach((resolvedDirective, key) => {
                     if (!resolvedDirective) {
                         return;
@@ -23393,7 +23397,7 @@ namespace ts {
                 // check that at least one declaration of top level symbol originates from type declaration file
                 for (const decl of symbol.declarations) {
                     const file = getSourceFileOfNode(decl);
-                    if (fileToDirective.contains(file.path)) {
+                    if (fileToDirective.has(file.path)) {
                         return true;
                     }
                 }

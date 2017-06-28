@@ -382,7 +382,7 @@ namespace ts {
     }
 
     interface DiagnosticCache {
-        perFile?: FileMap<Diagnostic[]>;
+        perFile?: Map<Diagnostic[]>;
         allDiagnostics?: Diagnostic[];
     }
 
@@ -472,7 +472,7 @@ namespace ts {
             resolveTypeReferenceDirectiveNamesWorker = (typeReferenceDirectiveNames, containingFile) => loadWithLocalCache(typeReferenceDirectiveNames, containingFile, loader);
         }
 
-        const filesByName = createFileMap<SourceFile>();
+        const filesByName = createMap<SourceFile>();
         // stores 'filename -> file association' ignoring case
         // used to track cases when two file names differ only in casing
         const filesByNameIgnoreCase = host.useCaseSensitiveFileNames() ? createFileMap<SourceFile>(fileName => fileName.toLowerCase()) : undefined;
@@ -1137,7 +1137,6 @@ namespace ts {
                         case SyntaxKind.FunctionExpression:
                         case SyntaxKind.FunctionDeclaration:
                         case SyntaxKind.ArrowFunction:
-                        case SyntaxKind.FunctionDeclaration:
                         case SyntaxKind.VariableDeclaration:
                             // type annotation
                             if ((<FunctionLikeDeclaration | VariableDeclaration | ParameterDeclaration | PropertyDeclaration>parent).type === node) {
@@ -1202,7 +1201,6 @@ namespace ts {
                         case SyntaxKind.FunctionExpression:
                         case SyntaxKind.FunctionDeclaration:
                         case SyntaxKind.ArrowFunction:
-                        case SyntaxKind.FunctionDeclaration:
                             // Check type parameters
                             if (nodes === (<ClassDeclaration | FunctionLikeDeclaration>parent).typeParameters) {
                                 diagnostics.push(createDiagnosticForNodeArray(nodes, Diagnostics.type_parameter_declarations_can_only_be_used_in_a_ts_file));
@@ -1316,7 +1314,7 @@ namespace ts {
             const result = getDiagnostics(sourceFile, cancellationToken) || emptyArray;
             if (sourceFile) {
                 if (!cache.perFile) {
-                    cache.perFile = createFileMap<Diagnostic[]>();
+                    cache.perFile = createMap<Diagnostic[]>();
                 }
                 cache.perFile.set(sourceFile.path, result);
             }
@@ -1533,7 +1531,7 @@ namespace ts {
 
         // Get source file from normalized fileName
         function findSourceFile(fileName: string, path: Path, isDefaultLib: boolean, refFile?: SourceFile, refPos?: number, refEnd?: number): SourceFile {
-            if (filesByName.contains(path)) {
+            if (filesByName.has(path)) {
                 const file = filesByName.get(path);
                 // try to check if we've already seen this file but with a different casing in path
                 // NOTE: this only makes sense for case-insensitive file systems
@@ -1953,7 +1951,7 @@ namespace ts {
             // If the emit is enabled make sure that every output file is unique and not overwriting any of the input files
             if (!options.noEmit && !options.suppressOutputPathCheck) {
                 const emitHost = getEmitHost();
-                const emitFilesSeen = createFileMap<boolean>(!host.useCaseSensitiveFileNames() ? key => key.toLocaleLowerCase() : undefined);
+                const emitFilesSeen = createFileMap<boolean>(!host.useCaseSensitiveFileNames() ? key => key.toLocaleLowerCase() : key => key);
                 forEachEmittedFile(emitHost, (emitFileNames) => {
                     verifyEmitFilePath(emitFileNames.jsFilePath, emitFilesSeen);
                     verifyEmitFilePath(emitFileNames.declarationFilePath, emitFilesSeen);
@@ -1965,7 +1963,7 @@ namespace ts {
                 if (emitFileName) {
                     const emitFilePath = toPath(emitFileName, currentDirectory, getCanonicalFileName);
                     // Report error if the output overwrites input file
-                    if (filesByName.contains(emitFilePath)) {
+                    if (filesByName.has(emitFilePath)) {
                         let chain: DiagnosticMessageChain;
                         if (!options.configFilePath) {
                             // The program is from either an inferred project or an external project

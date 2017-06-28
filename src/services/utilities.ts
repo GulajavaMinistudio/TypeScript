@@ -275,6 +275,13 @@ namespace ts {
     }
 
     export function getContainerNode(node: Node): Declaration {
+        if (node.kind === SyntaxKind.JSDocTypedefTag) {
+            // This doesn't just apply to the node immediately under the comment, but to everything in its parent's scope.
+            // node.parent = the JSDoc comment, node.parent.parent = the node having the comment.
+            // Then we get parent again in the loop.
+            node = node.parent.parent;
+        }
+
         while (true) {
             node = node.parent;
             if (!node) {
@@ -787,7 +794,7 @@ namespace ts {
 
     export function isInString(sourceFile: SourceFile, position: number): boolean {
         const previousToken = findPrecedingToken(position, sourceFile);
-        if (previousToken && previousToken.kind === SyntaxKind.StringLiteral) {
+        if (previousToken && isStringTextContainingNode(previousToken)) {
             const start = previousToken.getStart();
             const end = previousToken.getEnd();
 
@@ -1303,14 +1310,7 @@ namespace ts {
     export function getScriptKind(fileName: string, host?: LanguageServiceHost): ScriptKind {
         // First check to see if the script kind was specified by the host. Chances are the host
         // may override the default script kind for the file extension.
-        let scriptKind: ScriptKind;
-        if (host && host.getScriptKind) {
-            scriptKind = host.getScriptKind(fileName);
-        }
-        if (!scriptKind) {
-            scriptKind = getScriptKindFromFileName(fileName);
-        }
-        return ensureScriptKind(fileName, scriptKind);
+        return ensureScriptKind(fileName, host && host.getScriptKind && host.getScriptKind(fileName));
     }
 
     export function getFirstNonSpaceCharacterPosition(text: string, position: number) {

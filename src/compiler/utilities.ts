@@ -1155,7 +1155,6 @@ namespace ts {
 
     export function isPartOfExpression(node: Node): boolean {
         switch (node.kind) {
-            case SyntaxKind.ThisKeyword:
             case SyntaxKind.SuperKeyword:
             case SyntaxKind.NullKeyword:
             case SyntaxKind.TrueKeyword:
@@ -1224,7 +1223,6 @@ namespace ts {
                     case SyntaxKind.SwitchStatement:
                     case SyntaxKind.CaseClause:
                     case SyntaxKind.ThrowStatement:
-                    case SyntaxKind.SwitchStatement:
                         return (<ExpressionStatement>parent).expression === node;
                     case SyntaxKind.ForStatement:
                         const forStatement = <ForStatement>parent;
@@ -4741,6 +4739,19 @@ namespace ts {
         const kind = node.kind;
         return kind === SyntaxKind.TemplateMiddle
             || kind === SyntaxKind.TemplateTail;
+    }
+
+    export function isStringTextContainingNode(node: Node) {
+        switch (node.kind) {
+            case SyntaxKind.StringLiteral:
+            case SyntaxKind.TemplateHead:
+            case SyntaxKind.TemplateMiddle:
+            case SyntaxKind.TemplateTail:
+            case SyntaxKind.NoSubstitutionTemplateLiteral:
+                return true;
+            default:
+                return false;
+        }
     }
 
     // Identifiers

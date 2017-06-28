@@ -145,7 +145,7 @@ namespace ts {
         };
     }
 
-    export function createFileMap<T>(keyMapper?: (key: string) => string): FileMap<T> {
+    export function createFileMap<T>(keyMapper: (key: string) => string): FileMap<T> {
         const files = createMap<T>();
         return {
             get,
@@ -169,27 +169,23 @@ namespace ts {
 
         // path should already be well-formed so it does not need to be normalized
         function get(path: Path): T {
-            return files.get(toKey(path));
+            return files.get(keyMapper(path));
         }
 
         function set(path: Path, value: T) {
-            files.set(toKey(path), value);
+            files.set(keyMapper(path), value);
         }
 
         function contains(path: Path) {
-            return files.has(toKey(path));
+            return files.has(keyMapper(path));
         }
 
         function remove(path: Path) {
-            files.delete(toKey(path));
+            files.delete(keyMapper(path));
         }
 
         function clear() {
             files.clear();
-        }
-
-        function toKey(path: Path): string {
-            return keyMapper ? keyMapper(path) : path;
         }
     }
 
@@ -2118,14 +2114,14 @@ namespace ts {
         return absolute.substring(0, absolute.lastIndexOf(directorySeparator, wildcardOffset));
     }
 
-    export function ensureScriptKind(fileName: string, scriptKind?: ScriptKind): ScriptKind {
+    export function ensureScriptKind(fileName: string, scriptKind: ScriptKind | undefined): ScriptKind {
         // Using scriptKind as a condition handles both:
         // - 'scriptKind' is unspecified and thus it is `undefined`
         // - 'scriptKind' is set and it is `Unknown` (0)
         // If the 'scriptKind' is 'undefined' or 'Unknown' then we attempt
         // to get the ScriptKind from the file name. If it cannot be resolved
         // from the file name then the default 'TS' script kind is returned.
-        return (scriptKind || getScriptKindFromFileName(fileName)) || ScriptKind.TS;
+        return scriptKind || getScriptKindFromFileName(fileName) || ScriptKind.TS;
     }
 
     export function getScriptKindFromFileName(fileName: string): ScriptKind {
