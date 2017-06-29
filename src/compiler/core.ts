@@ -2,8 +2,9 @@
 /// <reference path="performance.ts" />
 
 namespace ts {
+    export const versionMajorMinor = "2.5";
     /** The version of the TypeScript compiler release */
-    export const version = "2.5.0";
+    export const version = `${versionMajorMinor}.0`;
 }
 
 /* @internal */
@@ -1097,6 +1098,15 @@ namespace ts {
         return result;
     }
 
+    /**
+     * Creates a set from the elements of an array.
+     *
+     * @param array the array of input elements.
+     */
+    export function arrayToSet<T>(array: T[], makeKey: (value: T) => string): Map<true> {
+        return arrayToMap<T, true>(array, makeKey, () => true);
+    }
+
     export function cloneMap<T>(map: Map<T>) {
         const clone = createMap<T>();
         copyEntries(map, clone);
@@ -2016,7 +2026,7 @@ namespace ts {
         };
     }
 
-    export function matchFiles(path: string, extensions: string[], excludes: string[], includes: string[], useCaseSensitiveFileNames: boolean, currentDirectory: string, getFileSystemEntries: (path: string) => FileSystemEntries): string[] {
+    export function matchFiles(path: string, extensions: string[], excludes: string[], includes: string[], useCaseSensitiveFileNames: boolean, currentDirectory: string, depth: number | undefined, getFileSystemEntries: (path: string) => FileSystemEntries): string[] {
         path = normalizePath(path);
         currentDirectory = normalizePath(currentDirectory);
 
@@ -2033,15 +2043,14 @@ namespace ts {
 
         const comparer = useCaseSensitiveFileNames ? compareStrings : compareStringsCaseInsensitive;
         for (const basePath of patterns.basePaths) {
-            visitDirectory(basePath, combinePaths(currentDirectory, basePath));
+            visitDirectory(basePath, combinePaths(currentDirectory, basePath), depth);
         }
 
         return flatten(results);
 
-        function visitDirectory(path: string, absolutePath: string) {
+        function visitDirectory(path: string, absolutePath: string, depth: number | undefined) {
             let { files, directories } = getFileSystemEntries(path);
             files = files.slice().sort(comparer);
-            directories = directories.slice().sort(comparer);
 
             for (const current of files) {
                 const name = combinePaths(path, current);
@@ -2059,12 +2068,20 @@ namespace ts {
                 }
             }
 
+            if (depth !== undefined) {
+                depth--;
+                if (depth === 0) {
+                    return;
+                }
+            }
+
+            directories = directories.slice().sort(comparer);
             for (const current of directories) {
                 const name = combinePaths(path, current);
                 const absoluteName = combinePaths(absolutePath, current);
                 if ((!includeDirectoryRegex || includeDirectoryRegex.test(absoluteName)) &&
                     (!excludeRegex || !excludeRegex.test(absoluteName))) {
-                    visitDirectory(name, absoluteName);
+                    visitDirectory(name, absoluteName, depth);
                 }
             }
         }

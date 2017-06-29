@@ -2390,7 +2390,7 @@ namespace ts {
     export interface ParseConfigHost {
         useCaseSensitiveFileNames: boolean;
 
-        readDirectory(rootDir: string, extensions: string[], excludes: string[], includes: string[]): string[];
+        readDirectory(rootDir: string, extensions: string[], excludes: string[], includes: string[], depth: number): string[];
 
         /**
          * Gets a value indicating whether the specified path exists and is a file.
@@ -2425,6 +2425,13 @@ namespace ts {
          * Get a list of files in the program
          */
         getSourceFiles(): SourceFile[];
+
+        /**
+         * Get a list of file names that were passed to 'createProgram' or referenced in a
+         * program source file but could not be located.
+         */
+        /* @internal */
+        getMissingFilePaths(): Path[];
 
         /**
          * Emits the JavaScript and declaration files.  If targetSourceFile is not specified, then
@@ -3179,7 +3186,7 @@ namespace ts {
         objectFlags: ObjectFlags;
     }
 
-    /** Class and interface types (TypeFlags.Class and TypeFlags.Interface). */
+    /** Class and interface types (ObjectFlags.Class and ObjectFlags.Interface). */
     export interface InterfaceType extends ObjectType {
         typeParameters: TypeParameter[];           // Type parameters (undefined if non-generic)
         outerTypeParameters: TypeParameter[];      // Outer type parameters (undefined if none)
@@ -3203,7 +3210,7 @@ namespace ts {
     }
 
     /**
-     * Type references (TypeFlags.Reference). When a class or interface has type parameters or
+     * Type references (ObjectFlags.Reference). When a class or interface has type parameters or
      * a "this" type, references to the class or interface are made using type references. The
      * typeArguments property specifies the types to substitute for the type parameters of the
      * class or interface and optionally includes an extra element that specifies the type to
