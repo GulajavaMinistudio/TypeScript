@@ -1930,7 +1930,7 @@ namespace ts {
         }
 
         function createTypeofType() {
-            return getUnionType(convertToArray(typeofEQFacts.keys(), getLiteralType));
+            return getUnionType(arrayFrom(typeofEQFacts.keys(), getLiteralType));
         }
 
         // A reserved member name starts with two underscores, but the third character cannot be an underscore
@@ -6398,7 +6398,7 @@ namespace ts {
                     undefined;
                 // JS functions get a free rest parameter if they reference `arguments`
                 let hasRestLikeParameter = hasRestParameter(declaration);
-                if (!hasRestLikeParameter && isInJavaScriptFile(declaration) && !hasJSDocParameterTags(declaration) && containsArgumentsReference(declaration)) {
+                if (!hasRestLikeParameter && isInJavaScriptFile(declaration) && containsArgumentsReference(declaration)) {
                     hasRestLikeParameter = true;
                     const syntheticArgsSymbol = createSymbol(SymbolFlags.Variable, "args");
                     syntheticArgsSymbol.type = anyArrayType;
@@ -10531,12 +10531,8 @@ namespace ts {
                 }
             }
 
-            function inferFromParameterTypes(source: Type, target: Type) {
-                return inferFromTypes(source, target);
-            }
-
             function inferFromSignature(source: Signature, target: Signature) {
-                forEachMatchingParameterType(source, target, inferFromParameterTypes);
+                forEachMatchingParameterType(source, target, inferFromTypes);
 
                 if (source.typePredicate && target.typePredicate && source.typePredicate.kind === target.typePredicate.kind) {
                     inferFromTypes(source.typePredicate.type, target.typePredicate.type);
@@ -14504,7 +14500,7 @@ namespace ts {
         }
 
         function getSuggestionForNonexistentProperty(node: Identifier, containingType: Type): string | undefined {
-            const suggestion = getSpellingSuggestionForName(node.text, getPropertiesOfObjectType(containingType), SymbolFlags.Value);
+            const suggestion = getSpellingSuggestionForName(node.text, getPropertiesOfType(containingType), SymbolFlags.Value);
             return suggestion && suggestion.name;
         }
 
