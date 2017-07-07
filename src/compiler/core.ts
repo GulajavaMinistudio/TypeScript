@@ -1117,8 +1117,10 @@ namespace ts {
      *
      * @param array the array of input elements.
      */
-    export function arrayToSet<T>(array: T[], makeKey: (value: T) => string): Map<true> {
-        return arrayToMap<T, true>(array, makeKey, () => true);
+    export function arrayToSet(array: string[]): Map<true>;
+    export function arrayToSet<T>(array: T[], makeKey: (value: T) => string): Map<true>;
+    export function arrayToSet(array: any[], makeKey?: (value: any) => string): Map<true> {
+        return arrayToMap<any, true>(array, makeKey || (s => s), () => true);
     }
 
     export function cloneMap(map: SymbolTable): SymbolTable;
@@ -1733,7 +1735,7 @@ namespace ts {
         if (directoryComponents.length > 1 && lastOrUndefined(directoryComponents) === "") {
             // If the directory path given was of type test/cases/ then we really need components of directory to be only till its name
             // that is  ["test", "cases", ""] needs to be actually ["test", "cases"]
-            directoryComponents.length--;
+            directoryComponents.pop();
         }
 
         // Find the component that differs

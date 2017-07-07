@@ -1782,7 +1782,7 @@ namespace ts {
 
         function getExportsOfModule(moduleSymbol: Symbol): SymbolTable {
             const links = getSymbolLinks(moduleSymbol);
-            return links.resolvedExports || (links.resolvedExports = getExportsForModule(moduleSymbol));
+            return links.resolvedExports || (links.resolvedExports = getExportsOfModuleWorker(moduleSymbol));
         }
 
         interface ExportCollisionTracker {
@@ -1821,13 +1821,13 @@ namespace ts {
             });
         }
 
-        function getExportsForModule(moduleSymbol: Symbol): SymbolTable {
+        function getExportsOfModuleWorker(moduleSymbol: Symbol): SymbolTable {
             const visitedSymbols: Symbol[] = [];
 
             // A module defined by an 'export=' consists on one export that needs to be resolved
             moduleSymbol = resolveExternalModuleSymbol(moduleSymbol);
 
-            return visit(moduleSymbol) || moduleSymbol.exports;
+            return visit(moduleSymbol) || emptySymbols;
 
             // The ES6 spec permits export * declarations in a module to circularly reference the module itself. For example,
             // module 'a' can 'export * from "b"' and 'b' can 'export * from "a"' without error.
@@ -21180,7 +21180,7 @@ namespace ts {
                 for (const prop of properties) {
                     const existing = seen.get(prop.name);
                     if (!existing) {
-                        seen.set(prop.name, { prop: prop, containingType: base });
+                        seen.set(prop.name, { prop, containingType: base });
                     }
                     else {
                         const isInheritedProperty = existing.containingType !== type;
