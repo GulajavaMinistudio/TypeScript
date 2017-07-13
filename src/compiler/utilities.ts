@@ -3334,7 +3334,7 @@ namespace ts {
             }
         }
 
-        return stableSort(result, (x, y) => compareValues(x[0], y[0]));
+        return stableSort<[number, string]>(result, (x, y) => compareValues(x[0], y[0]));
     }
 
     export function formatSyntaxKind(kind: SyntaxKind): string {
@@ -5121,6 +5121,7 @@ namespace ts {
             || kind === SyntaxKind.ThisKeyword
             || kind === SyntaxKind.TrueKeyword
             || kind === SyntaxKind.SuperKeyword
+            || kind === SyntaxKind.ImportKeyword
             || kind === SyntaxKind.NonNullExpression
             || kind === SyntaxKind.MetaProperty;
     }

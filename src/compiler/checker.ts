@@ -83,9 +83,9 @@ namespace ts {
         // extra cost of calling `getParseTreeNode` when calling these functions from inside the
         // checker.
         const checker: TypeChecker = {
-            getNodeCount: () => sum<"nodeCount">(host.getSourceFiles(), "nodeCount"),
-            getIdentifierCount: () => sum<"identifierCount">(host.getSourceFiles(), "identifierCount"),
-            getSymbolCount: () => sum<"symbolCount">(host.getSourceFiles(), "symbolCount") + symbolCount,
+            getNodeCount: () => sum(host.getSourceFiles(), "nodeCount"),
+            getIdentifierCount: () => sum(host.getSourceFiles(), "identifierCount"),
+            getSymbolCount: () => sum(host.getSourceFiles(), "symbolCount") + symbolCount,
             getTypeCount: () => typeCount,
             isUndefinedSymbol: symbol => symbol === undefinedSymbol,
             isArgumentsSymbol: symbol => symbol === argumentsSymbol,
@@ -2010,7 +2010,7 @@ namespace ts {
             }
 
             function getAccessibleSymbolChainFromSymbolTableWorker(symbols: SymbolTable, visitedSymbolTables: SymbolTable[]): Symbol[] {
-                if (contains(visitedSymbolTables, symbols)) {
+                if (contains<SymbolTable>(visitedSymbolTables, symbols)) {
                     return undefined;
                 }
                 visitedSymbolTables.push(symbols);
@@ -6892,6 +6892,7 @@ namespace ts {
                     case "Null":
                         return nullType;
                     case "Object":
+                    case "object":
                         return anyType;
                     case "Function":
                     case "function":
@@ -11065,8 +11066,14 @@ namespace ts {
             if (!links.switchTypes) {
                 // If all case clauses specify expressions that have unit types, we return an array
                 // of those unit types. Otherwise we return an empty array.
-                const types = map(switchStatement.caseBlock.clauses, getTypeOfSwitchClause);
-                links.switchTypes = !contains(types, undefined) ? types : emptyArray;
+                links.switchTypes = [];
+                for (const clause of switchStatement.caseBlock.clauses) {
+                    const type = getTypeOfSwitchClause(clause);
+                    if (type === undefined) {
+                        return links.switchTypes = emptyArray;
+                    }
+                    links.switchTypes.push(type);
+                }
             }
             return links.switchTypes;
         }
@@ -20917,7 +20924,7 @@ namespace ts {
             }
         }
 
-        function areTypeParametersIdentical(declarations: (ClassDeclaration | InterfaceDeclaration)[], typeParameters: TypeParameter[]) {
+        function areTypeParametersIdentical(declarations: ReadonlyArray<ClassDeclaration | InterfaceDeclaration>, typeParameters: TypeParameter[]) {
             const maxTypeArgumentCount = length(typeParameters);
             const minTypeArgumentCount = getMinTypeArgumentCount(typeParameters);
 
