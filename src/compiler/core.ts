@@ -467,6 +467,17 @@ namespace ts {
         return result;
     }
 
+    export function flatMapIter<T, U>(iter: Iterator<T>, mapfn: (x: T) => U[] | undefined): U[] {
+        const result: U[] = [];
+        while (true) {
+            const { value, done } = iter.next();
+            if (done) break;
+            const res = mapfn(value);
+            if (res) result.push(...res);
+        }
+        return result;
+    }
+
     /**
      * Maps an array. If the mapped value is an array, it is spread into the result.
      * Avoids allocation if all elements map to themselves.
@@ -1569,10 +1580,21 @@ namespace ts {
         return path && !isRootedDiskPath(path) && path.indexOf("://") !== -1;
     }
 
+    /* @internal */
+    export function pathIsRelative(path: string): boolean {
+        return /^\.\.?($|[\\/])/.test(path);
+    }
+
     export function isExternalModuleNameRelative(moduleName: string): boolean {
         // TypeScript 1.0 spec (April 2014): 11.2.1
         // An external module name is "relative" if the first term is "." or "..".
-        return /^\.\.?($|[\\/])/.test(moduleName);
+        // Update: We also consider a path like `C:\foo.ts` "relative" because we do not search for it in `node_modules` or treat it as an ambient module.
+        return pathIsRelative(moduleName) || isRootedDiskPath(moduleName);
+    }
+
+    /** @deprecated Use `!isExternalModuleNameRelative(moduleName)` instead. */
+    export function moduleHasNonRelativeName(moduleName: string): boolean {
+        return !isExternalModuleNameRelative(moduleName);
     }
 
     export function getEmitScriptTarget(compilerOptions: CompilerOptions) {

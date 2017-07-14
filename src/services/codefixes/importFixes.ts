@@ -222,10 +222,7 @@ namespace ts.codefix {
         }
 
         function getUniqueSymbolId(symbol: Symbol) {
-            if (symbol.flags & SymbolFlags.Alias) {
-                return getSymbolId(checker.getAliasedSymbol(symbol));
-            }
-            return getSymbolId(symbol);
+            return getSymbolId(skipAlias(symbol, checker));
         }
 
         function checkSymbolHasMeaning(symbol: Symbol, meaning: SemanticMeaning) {
@@ -568,7 +565,7 @@ namespace ts.codefix {
 
                 function getRelativePath(path: string, directoryPath: string) {
                     const relativePath = getRelativePathToDirectoryOrUrl(directoryPath, path, directoryPath, getCanonicalFileName, /*isAbsolutePathAnUrl*/ false);
-                    return moduleHasNonRelativeName(relativePath) ? "./" + relativePath : relativePath;
+                    return !pathIsRelative(relativePath) ? "./" + relativePath : relativePath;
                 }
             }
 

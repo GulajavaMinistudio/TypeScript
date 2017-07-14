@@ -57,7 +57,7 @@ namespace ts.Completions {
 
         if (isSourceFileJavaScript(sourceFile)) {
             const uniqueNames = getCompletionEntriesFromSymbols(symbols, entries, location, /*performCharacterChecks*/ true, typeChecker, compilerOptions.target, log);
-            addRange(entries, getJavaScriptCompletionEntries(sourceFile, location.pos, uniqueNames, compilerOptions.target));
+            getJavaScriptCompletionEntries(sourceFile, location.pos, uniqueNames, compilerOptions.target, entries);
         }
         else {
             if ((!symbols || symbols.length === 0) && keywordFilters === KeywordCompletionFilters.None) {
@@ -79,33 +79,34 @@ namespace ts.Completions {
         return { isGlobalCompletion, isMemberCompletion, isNewIdentifierLocation, entries };
     }
 
-    function getJavaScriptCompletionEntries(sourceFile: SourceFile, position: number, uniqueNames: Map<true>, target: ScriptTarget): CompletionEntry[] {
-        const entries: CompletionEntry[] = [];
-
-        const nameTable = getNameTable(sourceFile);
-        nameTable.forEach((pos, name) => {
+    function getJavaScriptCompletionEntries(
+        sourceFile: SourceFile,
+        position: number,
+        uniqueNames: Map<true>,
+        target: ScriptTarget,
+        entries: Push<CompletionEntry>): void {
+        getNameTable(sourceFile).forEach((pos, name) => {
             // Skip identifiers produced only from the current location
             if (pos === position) {
                 return;
             }
             const realName = unescapeLeadingUnderscores(name);
 
-            if (!uniqueNames.get(realName)) {
-                uniqueNames.set(realName, true);
-                const displayName = getCompletionEntryDisplayName(realName, target, /*performCharacterChecks*/ true);
-                if (displayName) {
-                    const entry = {
-                        name: displayName,
-                        kind: ScriptElementKind.warning,
-                        kindModifiers: "",
-                        sortText: "1"
-                    };
-                    entries.push(entry);
-                }
+            if (uniqueNames.has(realName)) {
+                return;
+            }
+
+            uniqueNames.set(realName, true);
+            const displayName = getCompletionEntryDisplayName(realName, target, /*performCharacterChecks*/ true);
+            if (displayName) {
+                entries.push({
+                    name: displayName,
+                    kind: ScriptElementKind.warning,
+                    kindModifiers: "",
+                    sortText: "1"
+                });
             }
         });
-
-        return entries;
     }
 
     function createCompletionEntry(symbol: Symbol, location: Node, performCharacterChecks: boolean, typeChecker: TypeChecker, target: ScriptTarget): CompletionEntry {
@@ -141,7 +142,7 @@ namespace ts.Completions {
                 const entry = createCompletionEntry(symbol, location, performCharacterChecks, typeChecker, target);
                 if (entry) {
                     const id = entry.name;
-                    if (!uniqueNames.get(id)) {
+                    if (!uniqueNames.has(id)) {
                         entries.push(entry);
                         uniqueNames.set(id, true);
                     }
@@ -595,46 +596,48 @@ namespace ts.Completions {
             isNewIdentifierLocation = false;
 
             // Since this is qualified name check its a type node location
-            const isTypeLocation = isPartOfTypeNode(node.parent) || insideJsDocTagTypeExpression;
+            const isTypeLocation = insideJsDocTagTypeExpression || isPartOfTypeNode(node.parent);
             const isRhsOfImportDeclaration = isInRightSideOfInternalImportEqualsDeclaration(node);
-            if (node.kind === SyntaxKind.Identifier || node.kind === SyntaxKind.QualifiedName || node.kind === SyntaxKind.PropertyAccessExpression) {
+            if (isEntityName(node)) {
                 let symbol = typeChecker.getSymbolAtLocation(node);
+                if (symbol) {
+                    symbol = skipAlias(symbol, typeChecker);
 
-                // This is an alias, follow what it aliases
-                if (symbol && symbol.flags & SymbolFlags.Alias) {
-                    symbol = typeChecker.getAliasedSymbol(symbol);
-                }
-
-                if (symbol && symbol.flags & SymbolFlags.HasExports) {
-                    // Extract module or enum members
-                    const exportedSymbols = typeChecker.getExportsOfModule(symbol);
-                    const isValidValueAccess = (symbol: Symbol) => typeChecker.isValidPropertyAccess(<PropertyAccessExpression>(node.parent), symbol.getUnescapedName());
-                    const isValidTypeAccess = (symbol: Symbol) => symbolCanBeReferencedAtTypeLocation(symbol);
-                    const isValidAccess = isRhsOfImportDeclaration ?
-                        // Any kind is allowed when dotting off namespace in internal import equals declaration
-                        (symbol: Symbol) => isValidTypeAccess(symbol) || isValidValueAccess(symbol) :
-                        isTypeLocation ? isValidTypeAccess : isValidValueAccess;
-                    forEach(exportedSymbols, symbol => {
-                        if (isValidAccess(symbol)) {
-                            symbols.push(symbol);
+                    if (symbol.flags & (SymbolFlags.Module | SymbolFlags.Enum)) {
+                        // Extract module or enum members
+                        const exportedSymbols = typeChecker.getExportsOfModule(symbol);
+                        const isValidValueAccess = (symbol: Symbol) => typeChecker.isValidPropertyAccess(<PropertyAccessExpression>(node.parent), symbol.getUnescapedName());
+                        const isValidTypeAccess = (symbol: Symbol) => symbolCanBeReferencedAtTypeLocation(symbol);
+                        const isValidAccess = isRhsOfImportDeclaration ?
+                            // Any kind is allowed when dotting off namespace in internal import equals declaration
+                            (symbol: Symbol) => isValidTypeAccess(symbol) || isValidValueAccess(symbol) :
+                            isTypeLocation ? isValidTypeAccess : isValidValueAccess;
+                        for (const symbol of exportedSymbols) {
+                            if (isValidAccess(symbol)) {
+                                symbols.push(symbol);
+                            }
                         }
-                    });
+
+                        // If the module is merged with a value, we must get the type of the class and add its propertes (for inherited static methods).
+                        if (!isTypeLocation && symbol.declarations.some(d => d.kind !== SyntaxKind.SourceFile && d.kind !== SyntaxKind.ModuleDeclaration && d.kind !== SyntaxKind.EnumDeclaration)) {
+                            addTypeProperties(typeChecker.getTypeOfSymbolAtLocation(symbol, node));
+                        }
+
+                        return;
+                    }
                 }
             }
 
             if (!isTypeLocation) {
-                const type = typeChecker.getTypeAtLocation(node);
-                if (type) addTypeProperties(type);
+                addTypeProperties(typeChecker.getTypeAtLocation(node));
             }
         }
 
         function addTypeProperties(type: Type) {
-            if (type) {
-                // Filter private properties
-                for (const symbol of type.getApparentProperties()) {
-                    if (typeChecker.isValidPropertyAccess(<PropertyAccessExpression>(node.parent), symbol.getUnescapedName())) {
-                        symbols.push(symbol);
-                    }
+            // Filter private properties
+            for (const symbol of type.getApparentProperties()) {
+                if (typeChecker.isValidPropertyAccess(<PropertyAccessExpression>(node.parent), symbol.getUnescapedName())) {
+                    symbols.push(symbol);
                 }
             }
 
@@ -810,15 +813,13 @@ namespace ts.Completions {
             symbol = symbol.exportSymbol || symbol;
 
             // This is an alias, follow what it aliases
-            if (symbol && symbol.flags & SymbolFlags.Alias) {
-                symbol = typeChecker.getAliasedSymbol(symbol);
-            }
+            symbol = skipAlias(symbol, typeChecker);
 
             if (symbol.flags & SymbolFlags.Type) {
                 return true;
             }
 
-            if (symbol.flags & (SymbolFlags.ValueModule | SymbolFlags.NamespaceModule)) {
+            if (symbol.flags & SymbolFlags.Module) {
                 const exportedSymbols = typeChecker.getExportsOfModule(symbol);
                 // If the exported symbols contains type,
                 // symbol can be referenced at locations where type is allowed
