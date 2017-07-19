@@ -1327,7 +1327,7 @@ namespace ts {
         function bindInitializedVariableFlow(node: VariableDeclaration | ArrayBindingElement) {
             const name = !isOmittedExpression(node) ? node.name : undefined;
             if (isBindingPattern(name)) {
-                for (const child of <ArrayBindingElement[]>name.elements) {
+                for (const child of name.elements) {
                     bindInitializedVariableFlow(child);
                 }
             }
@@ -2061,8 +2061,10 @@ namespace ts {
                 case SyntaxKind.Parameter:
                     return bindParameter(<ParameterDeclaration>node);
                 case SyntaxKind.VariableDeclaration:
+                    return bindVariableDeclarationOrBindingElement(<VariableDeclaration>node);
                 case SyntaxKind.BindingElement:
-                    return bindVariableDeclarationOrBindingElement(<VariableDeclaration | BindingElement>node);
+                    node.flowNode = currentFlow;
+                    return bindVariableDeclarationOrBindingElement(<BindingElement>node);
                 case SyntaxKind.PropertyDeclaration:
                 case SyntaxKind.PropertySignature:
                     return bindPropertyWorker(node as PropertyDeclaration | PropertySignature);
