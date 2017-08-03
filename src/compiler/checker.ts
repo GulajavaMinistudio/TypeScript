@@ -2583,10 +2583,8 @@ namespace ts {
                 }
 
                 function createTypeNodeFromObjectType(type: ObjectType): TypeNode {
-                    if (type.objectFlags & ObjectFlags.Mapped) {
-                        if (getConstraintTypeFromMappedType(<MappedType>type).flags & (TypeFlags.TypeParameter | TypeFlags.Index)) {
-                            return createMappedTypeNodeFromType(<MappedType>type);
-                        }
+                    if (isGenericMappedType(type)) {
+                        return createMappedTypeNodeFromType(<MappedType>type);
                     }
 
                     const resolved = resolveStructuredTypeMembers(type);
@@ -3489,11 +3487,9 @@ namespace ts {
                 }
 
                 function writeLiteralType(type: ObjectType, flags: TypeFormatFlags) {
-                    if (type.objectFlags & ObjectFlags.Mapped) {
-                        if (getConstraintTypeFromMappedType(<MappedType>type).flags & (TypeFlags.TypeParameter | TypeFlags.Index)) {
-                            writeMappedType(<MappedType>type);
-                            return;
-                        }
+                    if (isGenericMappedType(type)) {
+                        writeMappedType(<MappedType>type);
+                        return;
                     }
 
                     const resolved = resolveStructuredTypeMembers(type);
@@ -7592,10 +7588,16 @@ namespace ts {
         }
 
         function getIndexedAccessForMappedType(type: MappedType, indexType: Type, accessNode?: ElementAccessExpression | IndexedAccessTypeNode) {
-            const accessExpression = accessNode && accessNode.kind === SyntaxKind.ElementAccessExpression ? <ElementAccessExpression>accessNode : undefined;
-            if (accessExpression && isAssignmentTarget(accessExpression) && type.declaration.readonlyToken) {
-                error(accessExpression, Diagnostics.Index_signature_in_type_0_only_permits_reading, typeToString(type));
-                return unknownType;
+            if (accessNode) {
+                // Check if the index type is assignable to 'keyof T' for the object type.
+                if (!isTypeAssignableTo(indexType, getIndexType(type))) {
+                    error(accessNode, Diagnostics.Type_0_cannot_be_used_to_index_type_1, typeToString(indexType), typeToString(type));
+                    return unknownType;
+                }
+                if (accessNode.kind === SyntaxKind.ElementAccessExpression && isAssignmentTarget(accessNode) && type.declaration.readonlyToken) {
+                    error(accessNode, Diagnostics.Index_signature_in_type_0_only_permits_reading, typeToString(type));
+                    return unknownType;
+                }
             }
             const mapper = createTypeMapper([getTypeParameterFromMappedType(type)], [indexType]);
             const templateMapper = type.mapper ? combineTypeMappers(type.mapper, mapper) : mapper;
@@ -16968,8 +16970,13 @@ namespace ts {
             if (operandType === silentNeverType) {
                 return silentNeverType;
             }
-            if (node.operator === SyntaxKind.MinusToken && node.operand.kind === SyntaxKind.NumericLiteral) {
-                return getFreshTypeOfLiteralType(getLiteralType(-(<LiteralExpression>node.operand).text));
+            if (node.operand.kind === SyntaxKind.NumericLiteral) {
+                if (node.operator === SyntaxKind.MinusToken) {
+                    return getFreshTypeOfLiteralType(getLiteralType(-(<LiteralExpression>node.operand).text));
+                }
+                else if (node.operator === SyntaxKind.PlusToken) {
+                    return getFreshTypeOfLiteralType(getLiteralType(+(<LiteralExpression>node.operand).text));
+                }
             }
             switch (node.operator) {
                 case SyntaxKind.PlusToken:
@@ -18592,7 +18599,17 @@ namespace ts {
                     forEach(node.typeArguments, checkSourceElement);
                     if (produceDiagnostics) {
                         const symbol = getNodeLinks(node).resolvedSymbol;
-                        const typeParameters = symbol.flags & SymbolFlags.TypeAlias ? getSymbolLinks(symbol).typeParameters : (<TypeReference>type).target.localTypeParameters;
+                        if (!symbol) {
+                            // There is no resolved symbol cached if the type resolved to a builtin
+                            // via JSDoc type reference resolution (eg, Boolean became boolean), none
+                            // of which are generic when they have no associated symbol
+                            error(node, Diagnostics.Type_0_is_not_generic, typeToString(type));
+                            return;
+                        }
+                        let typeParameters = symbol.flags & SymbolFlags.TypeAlias && getSymbolLinks(symbol).typeParameters;
+                        if (!typeParameters && getObjectFlags(type) & ObjectFlags.Reference) {
+                            typeParameters = (<TypeReference>type).target.localTypeParameters;
+                        }
                         checkTypeArgumentConstraints(typeParameters, node.typeArguments);
                     }
                 }
@@ -18657,6 +18674,8 @@ namespace ts {
         }
 
         function checkIndexedAccessType(node: IndexedAccessTypeNode) {
+            checkSourceElement(node.objectType);
+            checkSourceElement(node.indexType);
             checkIndexedAccessIndexType(getTypeFromIndexedAccessTypeNode(node), node);
         }
 
