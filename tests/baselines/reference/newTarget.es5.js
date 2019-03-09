@@ -34,26 +34,35 @@ const O = {
 
 //// [newTarget.es5.js]
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
         d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
     };
 })();
-var A = (function () {
+var A = /** @class */ (function () {
     function A() {
         var _newTarget = this.constructor;
-        this.d = function _a() { var _newTarget = this && this instanceof _a ? this.constructor : void 0; return _newTarget; };
+        this.d = function _a() {
+            var _newTarget = this && this instanceof _a ? this.constructor : void 0;
+            return _newTarget;
+        };
         var a = _newTarget;
         var b = function () { return _newTarget; };
     }
-    A.c = function _a() { var _newTarget = this && this instanceof _a ? this.constructor : void 0; return _newTarget; };
+    A.c = function _a() {
+        var _newTarget = this && this instanceof _a ? this.constructor : void 0;
+        return _newTarget;
+    };
     return A;
 }());
-var B = (function (_super) {
+var B = /** @class */ (function (_super) {
     __extends(B, _super);
     function B() {
         var _newTarget = this.constructor;
@@ -69,11 +78,14 @@ function f1() {
     var g = _newTarget;
     var h = function () { return _newTarget; };
 }
-var f2 = function _a() {
-    var _newTarget = this && this instanceof _a ? this.constructor : void 0;
+var f2 = function _b() {
+    var _newTarget = this && this instanceof _b ? this.constructor : void 0;
     var i = _newTarget;
     var j = function () { return _newTarget; };
 };
 var O = {
-    k: function _b() { var _newTarget = this && this instanceof _b ? this.constructor : void 0; return _newTarget; }
+    k: function k() {
+        var _newTarget = this && this instanceof k ? this.constructor : void 0;
+        return _newTarget;
+    }
 };

@@ -44,9 +44,12 @@ module Generic {
 
 //// [instancePropertiesInheritedIntoClassType.js]
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
@@ -55,7 +58,7 @@ var __extends = (this && this.__extends) || (function () {
 })();
 var NonGeneric;
 (function (NonGeneric) {
-    var C = (function () {
+    var C = /** @class */ (function () {
         function C(a, b) {
             this.a = a;
             this.b = b;
@@ -71,7 +74,7 @@ var NonGeneric;
         C.prototype.fn = function () { return this; };
         return C;
     }());
-    var D = (function (_super) {
+    var D = /** @class */ (function (_super) {
         __extends(D, _super);
         function D() {
             return _super !== null && _super.apply(this, arguments) || this;
@@ -87,7 +90,7 @@ var NonGeneric;
 })(NonGeneric || (NonGeneric = {}));
 var Generic;
 (function (Generic) {
-    var C = (function () {
+    var C = /** @class */ (function () {
         function C(a, b) {
             this.a = a;
             this.b = b;
@@ -103,7 +106,7 @@ var Generic;
         C.prototype.fn = function () { return this; };
         return C;
     }());
-    var D = (function (_super) {
+    var D = /** @class */ (function (_super) {
         __extends(D, _super);
         function D() {
             return _super !== null && _super.apply(this, arguments) || this;

@@ -24,7 +24,7 @@ var d = {
 //// [declFileTypeofInAnonymousType.js]
 var m1;
 (function (m1) {
-    var c = (function () {
+    var c = /** @class */ (function () {
         function c() {
         }
         return c;
@@ -58,7 +58,7 @@ declare module m1 {
     enum e {
         weekday = 0,
         weekend = 1,
-        holiday = 2,
+        holiday = 2
     }
 }
 declare var a: {

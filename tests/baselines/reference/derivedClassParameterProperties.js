@@ -97,21 +97,24 @@ class Derived10<T> extends Base2<T> {
 //// [derivedClassParameterProperties.js]
 // ordering of super calls in derived constructors matters depending on other class contents
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
         d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
     };
 })();
-var Base = (function () {
+var Base = /** @class */ (function () {
     function Base() {
     }
     return Base;
 }());
-var Derived = (function (_super) {
+var Derived = /** @class */ (function (_super) {
     __extends(Derived, _super);
     function Derived(y) {
         var _this = this;
@@ -121,7 +124,7 @@ var Derived = (function (_super) {
     }
     return Derived;
 }(Base));
-var Derived2 = (function (_super) {
+var Derived2 = /** @class */ (function (_super) {
     __extends(Derived2, _super);
     function Derived2(y) {
         var _this = this;
@@ -132,7 +135,7 @@ var Derived2 = (function (_super) {
     }
     return Derived2;
 }(Base));
-var Derived3 = (function (_super) {
+var Derived3 = /** @class */ (function (_super) {
     __extends(Derived3, _super);
     function Derived3(y) {
         var _this = _super.call(this) || this;
@@ -142,7 +145,7 @@ var Derived3 = (function (_super) {
     }
     return Derived3;
 }(Base));
-var Derived4 = (function (_super) {
+var Derived4 = /** @class */ (function (_super) {
     __extends(Derived4, _super);
     function Derived4(y) {
         var _this = this;
@@ -153,7 +156,7 @@ var Derived4 = (function (_super) {
     }
     return Derived4;
 }(Base));
-var Derived5 = (function (_super) {
+var Derived5 = /** @class */ (function (_super) {
     __extends(Derived5, _super);
     function Derived5(y) {
         var _this = _super.call(this) || this;
@@ -163,7 +166,7 @@ var Derived5 = (function (_super) {
     }
     return Derived5;
 }(Base));
-var Derived6 = (function (_super) {
+var Derived6 = /** @class */ (function (_super) {
     __extends(Derived6, _super);
     function Derived6(y) {
         var _this = this;
@@ -174,7 +177,7 @@ var Derived6 = (function (_super) {
     }
     return Derived6;
 }(Base));
-var Derived7 = (function (_super) {
+var Derived7 = /** @class */ (function (_super) {
     __extends(Derived7, _super);
     function Derived7(y) {
         var _this = this;
@@ -186,7 +189,7 @@ var Derived7 = (function (_super) {
     }
     return Derived7;
 }(Base));
-var Derived8 = (function (_super) {
+var Derived8 = /** @class */ (function (_super) {
     __extends(Derived8, _super);
     function Derived8(y) {
         var _this = _super.call(this) || this;
@@ -198,12 +201,12 @@ var Derived8 = (function (_super) {
     return Derived8;
 }(Base));
 // generic cases of Derived7 and Derived8
-var Base2 = (function () {
+var Base2 = /** @class */ (function () {
     function Base2() {
     }
     return Base2;
 }());
-var Derived9 = (function (_super) {
+var Derived9 = /** @class */ (function (_super) {
     __extends(Derived9, _super);
     function Derived9(y) {
         var _this = this;
@@ -215,7 +218,7 @@ var Derived9 = (function (_super) {
     }
     return Derived9;
 }(Base2));
-var Derived10 = (function (_super) {
+var Derived10 = /** @class */ (function (_super) {
     __extends(Derived10, _super);
     function Derived10(y) {
         var _this = _super.call(this) || this;

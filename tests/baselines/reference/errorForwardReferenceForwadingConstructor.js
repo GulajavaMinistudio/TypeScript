@@ -13,9 +13,12 @@ class derived extends base { }
 //// [errorForwardReferenceForwadingConstructor.js]
 // Error forward referencing derived class with forwarding constructor
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
@@ -26,13 +29,13 @@ function f() {
     var d1 = new derived();
     var d2 = new derived(4);
 }
-var base = (function () {
+var base = /** @class */ (function () {
     function base(n) {
         this.n = n;
     }
     return base;
 }());
-var derived = (function (_super) {
+var derived = /** @class */ (function (_super) {
     __extends(derived, _super);
     function derived() {
         return _super !== null && _super.apply(this, arguments) || this;

@@ -1,6 +1,3 @@
-/// <reference path="../factory.ts" />
-/// <reference path="../visitor.ts" />
-
 /*@internal*/
 namespace ts {
     /**
@@ -27,7 +24,7 @@ namespace ts {
         context.onSubstituteNode = onSubstituteNode;
         context.enableSubstitution(SyntaxKind.PropertyAccessExpression);
         context.enableSubstitution(SyntaxKind.PropertyAssignment);
-        return transformSourceFile;
+        return chainBundle(transformSourceFile);
 
         /**
          * Transforms an ES5 source file to ES3.
@@ -111,8 +108,8 @@ namespace ts {
          * @param name An Identifier
          */
         function trySubstituteReservedName(name: Identifier) {
-            const token = name.originalKeywordKind || (nodeIsSynthesized(name) ? stringToToken(unescapeLeadingUnderscores(name.escapedText)) : undefined);
-            if (token >= SyntaxKind.FirstReservedWord && token <= SyntaxKind.LastReservedWord) {
+            const token = name.originalKeywordKind || (nodeIsSynthesized(name) ? stringToToken(idText(name)) : undefined);
+            if (token !== undefined && token >= SyntaxKind.FirstReservedWord && token <= SyntaxKind.LastReservedWord) {
                 return setTextRange(createLiteral(name), name);
             }
             return undefined;

@@ -7,6 +7,6 @@
 ////}
 ////let t: Gen;
 ////var { x, ...rest } = t;
-////rest./*2*/parent;
-const ranges = test.ranges();
+////rest.[|/*2*/parent|];
+
 verify.goToDefinition('2', [ '1' ]);

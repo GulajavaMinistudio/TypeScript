@@ -21,9 +21,12 @@ module X.Y.base.Z {
 
 //// [declFileWithClassNameConflictingWithClassReferredByExtendsClause.js]
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
@@ -36,7 +39,7 @@ var X;
     (function (Y) {
         var base;
         (function (base) {
-            var W = (function (_super) {
+            var W = /** @class */ (function (_super) {
                 __extends(W, _super);
                 function W() {
                     return _super !== null && _super.apply(this, arguments) || this;
@@ -54,7 +57,7 @@ var X;
         (function (base) {
             var Z;
             (function (Z) {
-                var W = (function (_super) {
+                var W = /** @class */ (function (_super) {
                     __extends(W, _super);
                     function W() {
                         return _super !== null && _super.apply(this, arguments) || this;

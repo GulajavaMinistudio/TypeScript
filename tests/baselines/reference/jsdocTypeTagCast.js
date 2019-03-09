@@ -80,9 +80,12 @@ if(/** @type {numOrStr is string} */(numOrStr === undefined)) { // Error
 var W;
 //// [b.js]
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
@@ -90,21 +93,21 @@ var __extends = (this && this.__extends) || (function () {
     };
 })();
 // @ts-check
-var W = ((4));
-var W = (4); // Error
+var W = /** @type {string} */ ( /** @type {*} */(4));
+var W = /** @type {string} */ (4); // Error
 /** @type {*} */
 var a;
 /** @type {string} */
 var s;
-var a = ("" + 4);
-var s = "" +/** @type {*} */  (4);
-var SomeBase = (function () {
+var a = /** @type {*} */ ("" + 4);
+var s = "" + /** @type {*} */ (4);
+var SomeBase = /** @class */ (function () {
     function SomeBase() {
         this.p = 42;
     }
     return SomeBase;
 }());
-var SomeDerived = (function (_super) {
+var SomeDerived = /** @class */ (function (_super) {
     __extends(SomeDerived, _super);
     function SomeDerived() {
         var _this = _super.call(this) || this;
@@ -113,7 +116,7 @@ var SomeDerived = (function (_super) {
     }
     return SomeDerived;
 }(SomeBase));
-var SomeOther = (function () {
+var SomeOther = /** @class */ (function () {
     function SomeOther() {
         this.q = 42;
     }
@@ -128,24 +131,24 @@ var someBase = new SomeBase();
 var someDerived = new SomeDerived();
 var someOther = new SomeOther();
 var someFakeClass = new SomeFakeClass();
-someBase =/** @type {SomeBase} */  (someDerived);
-someBase =/** @type {SomeBase} */  (someBase);
-someBase =/** @type {SomeBase} */  (someOther); // Error
-someDerived =/** @type {SomeDerived} */  (someDerived);
-someDerived =/** @type {SomeDerived} */  (someBase);
-someDerived =/** @type {SomeDerived} */  (someOther); // Error
-someOther =/** @type {SomeOther} */  (someDerived); // Error
-someOther =/** @type {SomeOther} */  (someBase); // Error
-someOther =/** @type {SomeOther} */  (someOther);
+someBase = /** @type {SomeBase} */ (someDerived);
+someBase = /** @type {SomeBase} */ (someBase);
+someBase = /** @type {SomeBase} */ (someOther); // Error
+someDerived = /** @type {SomeDerived} */ (someDerived);
+someDerived = /** @type {SomeDerived} */ (someBase);
+someDerived = /** @type {SomeDerived} */ (someOther); // Error
+someOther = /** @type {SomeOther} */ (someDerived); // Error
+someOther = /** @type {SomeOther} */ (someBase); // Error
+someOther = /** @type {SomeOther} */ (someOther);
 someFakeClass = someBase;
 someFakeClass = someDerived;
 someBase = someFakeClass; // Error
-someBase =/** @type {SomeBase} */  (someFakeClass);
+someBase = /** @type {SomeBase} */ (someFakeClass);
 // Type assertion cannot be a type-predicate type
 /** @type {number | string} */
 var numOrStr;
 /** @type {string} */
 var str;
-if ((numOrStr === undefined)) {
+if ( /** @type {numOrStr is string} */(numOrStr === undefined)) { // Error
     str = numOrStr; // Error, no narrowing occurred
 }

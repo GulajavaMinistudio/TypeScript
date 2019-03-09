@@ -2,8 +2,10 @@
 
 // @noUnusedLocals: true
 // @noUnusedParameters: true
-//// function f1() {
-////     [|return (x:number) => {}|]
-//// }
+////[|/*~a*/(/*~b*/x/*~c*/:/*~d*/number/*~e*/)/*~f*/ => /*~g*/{/*~h*/}/*~i*/|]
 
-verify.rangeAfterCodeFix("return () => {}", /*includeWhiteSpace*/ false, /*errorCode*/ undefined, /*index*/ 0);
+verify.codeFix({
+    description: "Remove declaration for: 'x'",
+    index: 0,
+    newRangeContent: "/*~a*/(/*~e*/)/*~f*/ => /*~g*/{/*~h*/}/*~i*/",
+});

@@ -13,9 +13,12 @@ module M {
 
 //// [classDeclarationMergedInModuleWithContinuation.js]
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
@@ -24,7 +27,7 @@ var __extends = (this && this.__extends) || (function () {
 })();
 var M;
 (function (M) {
-    var N = (function () {
+    var N = /** @class */ (function () {
         function N() {
         }
         return N;
@@ -35,7 +38,7 @@ var M;
     })(N = M.N || (M.N = {}));
 })(M || (M = {}));
 (function (M) {
-    var O = (function (_super) {
+    var O = /** @class */ (function (_super) {
         __extends(O, _super);
         function O() {
             return _super !== null && _super.apply(this, arguments) || this;

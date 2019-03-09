@@ -20,21 +20,24 @@ class Location {
 
 //// [interfaceExtendsClass1.js]
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
         d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
     };
 })();
-var Control = (function () {
+var Control = /** @class */ (function () {
     function Control() {
     }
     return Control;
 }());
-var Button = (function (_super) {
+var Button = /** @class */ (function (_super) {
     __extends(Button, _super);
     function Button() {
         return _super !== null && _super.apply(this, arguments) || this;
@@ -42,7 +45,7 @@ var Button = (function (_super) {
     Button.prototype.select = function () { };
     return Button;
 }(Control));
-var TextBox = (function (_super) {
+var TextBox = /** @class */ (function (_super) {
     __extends(TextBox, _super);
     function TextBox() {
         return _super !== null && _super.apply(this, arguments) || this;
@@ -50,14 +53,14 @@ var TextBox = (function (_super) {
     TextBox.prototype.select = function () { };
     return TextBox;
 }(Control));
-var Image = (function (_super) {
+var Image = /** @class */ (function (_super) {
     __extends(Image, _super);
     function Image() {
         return _super !== null && _super.apply(this, arguments) || this;
     }
     return Image;
 }(Control));
-var Location = (function () {
+var Location = /** @class */ (function () {
     function Location() {
     }
     Location.prototype.select = function () { };

@@ -1,46 +1,13 @@
-/// <reference path="..\compiler\program.ts"/>
-/// <reference path="..\compiler\commandLineParser.ts"/>
-
-/// <reference path='types.ts' />
-/// <reference path='utilities.ts' />
-/// <reference path='breakpoints.ts' />
-/// <reference path='classifier.ts' />
-/// <reference path='completions.ts' />
-/// <reference path='documentHighlights.ts' />
-/// <reference path='documentRegistry.ts' />
-/// <reference path='findAllReferences.ts' />
-/// <reference path='goToDefinition.ts' />
-/// <reference path='jsDoc.ts' />
-/// <reference path='jsTyping.ts' />
-/// <reference path='navigateTo.ts' />
-/// <reference path='navigationBar.ts' />
-/// <reference path='outliningElementsCollector.ts' />
-/// <reference path='patternMatcher.ts' />
-/// <reference path='preProcess.ts' />
-/// <reference path='rename.ts' />
-/// <reference path='signatureHelp.ts' />
-/// <reference path='symbolDisplay.ts' />
-/// <reference path='transpile.ts' />
-/// <reference path='formatting\formatting.ts' />
-/// <reference path='formatting\smartIndenter.ts' />
-/// <reference path='textChanges.ts' />
-/// <reference path='codeFixProvider.ts' />
-/// <reference path='refactorProvider.ts' />
-/// <reference path='codefixes\fixes.ts' />
-/// <reference path='refactors\refactors.ts' />
-
 namespace ts {
     /** The version of the language service API */
-    export const servicesVersion = "0.5";
+    export const servicesVersion = "0.8";
 
-    /* @internal */
-    let ruleProvider: formatting.RulesProvider;
-
-    function createNode<TKind extends SyntaxKind>(kind: TKind, pos: number, end: number, parent?: Node): NodeObject | TokenObject<TKind> | IdentifierObject {
+    function createNode<TKind extends SyntaxKind>(kind: TKind, pos: number, end: number, parent: Node): NodeObject | TokenObject<TKind> | IdentifierObject {
         const node = isNodeKind(kind) ? new NodeObject(kind, pos, end) :
             kind === SyntaxKind.Identifier ? new IdentifierObject(SyntaxKind.Identifier, pos, end) :
                 new TokenObject(kind, pos, end);
         node.parent = parent;
+        node.flags = parent.flags & NodeFlags.ContextFlags;
         return node;
     }
 
@@ -49,19 +16,206 @@ namespace ts {
         public pos: number;
         public end: number;
         public flags: NodeFlags;
-        public parent: Node;
-        public jsDoc: JSDoc[];
-        public original: Node;
+        public modifierFlagsCache: ModifierFlags;
         public transformFlags: TransformFlags;
-        private _children: Node[];
+        public parent: Node;
+        public symbol!: Symbol; // Actually optional, but it was too annoying to access `node.symbol!` everywhere since in many cases we know it must be defined
+        public jsDoc?: JSDoc[];
+        public original?: Node;
+        private _children: Node[] | undefined;
 
         constructor(kind: SyntaxKind, pos: number, end: number) {
             this.pos = pos;
             this.end = end;
             this.flags = NodeFlags.None;
-            this.transformFlags = undefined;
-            this.parent = undefined;
+            this.modifierFlagsCache = ModifierFlags.None;
+            this.transformFlags = TransformFlags.None;
+            this.parent = undefined!;
             this.kind = kind;
+        }
+
+        private assertHasRealPosition(message?: string) {
+            // tslint:disable-next-line:debug-assert
+            Debug.assert(!positionIsSynthesized(this.pos) && !positionIsSynthesized(this.end), message || "Node must have a real position for this operation");
+        }
+
+        public getSourceFile(): SourceFile {
+            return getSourceFileOfNode(this);
+        }
+
+        public getStart(sourceFile?: SourceFileLike, includeJsDocComment?: boolean): number {
+            this.assertHasRealPosition();
+            return getTokenPosOfNode(this, sourceFile, includeJsDocComment);
+        }
+
+        public getFullStart(): number {
+            this.assertHasRealPosition();
+            return this.pos;
+        }
+
+        public getEnd(): number {
+            this.assertHasRealPosition();
+            return this.end;
+        }
+
+        public getWidth(sourceFile?: SourceFile): number {
+            this.assertHasRealPosition();
+            return this.getEnd() - this.getStart(sourceFile);
+        }
+
+        public getFullWidth(): number {
+            this.assertHasRealPosition();
+            return this.end - this.pos;
+        }
+
+        public getLeadingTriviaWidth(sourceFile?: SourceFile): number {
+            this.assertHasRealPosition();
+            return this.getStart(sourceFile) - this.pos;
+        }
+
+        public getFullText(sourceFile?: SourceFile): string {
+            this.assertHasRealPosition();
+            return (sourceFile || this.getSourceFile()).text.substring(this.pos, this.end);
+        }
+
+        public getText(sourceFile?: SourceFile): string {
+            this.assertHasRealPosition();
+            if (!sourceFile) {
+                sourceFile = this.getSourceFile();
+            }
+            return sourceFile.text.substring(this.getStart(sourceFile), this.getEnd());
+        }
+
+        public getChildCount(sourceFile?: SourceFile): number {
+            return this.getChildren(sourceFile).length;
+        }
+
+        public getChildAt(index: number, sourceFile?: SourceFile): Node {
+            return this.getChildren(sourceFile)[index];
+        }
+
+        public getChildren(sourceFile?: SourceFileLike): Node[] {
+            this.assertHasRealPosition("Node without a real position cannot be scanned and thus has no token nodes - use forEachChild and collect the result if that's fine");
+            return this._children || (this._children = createChildren(this, sourceFile));
+        }
+
+        public getFirstToken(sourceFile?: SourceFile): Node | undefined {
+            this.assertHasRealPosition();
+            const children = this.getChildren(sourceFile);
+            if (!children.length) {
+                return undefined;
+            }
+
+            const child = find(children, kid => kid.kind < SyntaxKind.FirstJSDocNode || kid.kind > SyntaxKind.LastJSDocNode)!;
+            return child.kind < SyntaxKind.FirstNode ?
+                child :
+                child.getFirstToken(sourceFile);
+        }
+
+        public getLastToken(sourceFile?: SourceFile): Node | undefined {
+            this.assertHasRealPosition();
+            const children = this.getChildren(sourceFile);
+
+            const child = lastOrUndefined(children);
+            if (!child) {
+                return undefined;
+            }
+
+            return child.kind < SyntaxKind.FirstNode ? child : child.getLastToken(sourceFile);
+        }
+
+        public forEachChild<T>(cbNode: (node: Node) => T, cbNodeArray?: (nodes: NodeArray<Node>) => T): T | undefined {
+            return forEachChild(this, cbNode, cbNodeArray);
+        }
+    }
+
+    function createChildren(node: Node, sourceFile: SourceFileLike | undefined): Node[] {
+        if (!isNodeKind(node.kind)) {
+            return emptyArray;
+        }
+
+        const children: Node[] = [];
+
+        if (isJSDocCommentContainingNode(node)) {
+            /** Don't add trivia for "tokens" since this is in a comment. */
+            node.forEachChild(child => { children.push(child); });
+            return children;
+        }
+
+        scanner.setText((sourceFile || node.getSourceFile()).text);
+        let pos = node.pos;
+        const processNode = (child: Node) => {
+            addSyntheticNodes(children, pos, child.pos, node);
+            children.push(child);
+            pos = child.end;
+        };
+        const processNodes = (nodes: NodeArray<Node>) => {
+            addSyntheticNodes(children, pos, nodes.pos, node);
+            children.push(createSyntaxList(nodes, node));
+            pos = nodes.end;
+        };
+        // jsDocComments need to be the first children
+        forEach((node as JSDocContainer).jsDoc, processNode);
+        // For syntactic classifications, all trivia are classified together, including jsdoc comments.
+        // For that to work, the jsdoc comments should still be the leading trivia of the first child.
+        // Restoring the scanner position ensures that.
+        pos = node.pos;
+        node.forEachChild(processNode, processNodes);
+        addSyntheticNodes(children, pos, node.end, node);
+        scanner.setText(undefined);
+        return children;
+    }
+
+    function addSyntheticNodes(nodes: Push<Node>, pos: number, end: number, parent: Node): void {
+        scanner.setTextPos(pos);
+        while (pos < end) {
+            const token = scanner.scan();
+            const textPos = scanner.getTextPos();
+            if (textPos <= end) {
+                if (token === SyntaxKind.Identifier) {
+                    Debug.fail(`Did not expect ${Debug.showSyntaxKind(parent)} to have an Identifier in its trivia`);
+                }
+                nodes.push(createNode(token, pos, textPos, parent));
+            }
+            pos = textPos;
+            if (token === SyntaxKind.EndOfFileToken) {
+                break;
+            }
+        }
+    }
+
+    function createSyntaxList(nodes: NodeArray<Node>, parent: Node): Node {
+        const list = createNode(SyntaxKind.SyntaxList, nodes.pos, nodes.end, parent) as any as SyntaxList;
+        list._children = [];
+        let pos = nodes.pos;
+        for (const node of nodes) {
+            addSyntheticNodes(list._children, pos, node.pos, parent);
+            list._children.push(node);
+            pos = node.end;
+        }
+        addSyntheticNodes(list._children, pos, nodes.end, parent);
+        return list;
+    }
+
+    class TokenOrIdentifierObject implements Node {
+        public kind!: SyntaxKind;
+        public pos: number;
+        public end: number;
+        public flags: NodeFlags;
+        public modifierFlagsCache: ModifierFlags;
+        public transformFlags: TransformFlags;
+        public parent: Node;
+        public symbol!: Symbol;
+        public jsDocComments?: JSDoc[];
+
+        constructor(pos: number, end: number) {
+            // Set properties in same order as NodeObject
+            this.pos = pos;
+            this.end = end;
+            this.flags = NodeFlags.None;
+            this.modifierFlagsCache = ModifierFlags.None;
+            this.transformFlags = TransformFlags.None;
+            this.parent = undefined!;
         }
 
         public getSourceFile(): SourceFile {
@@ -103,201 +257,27 @@ namespace ts {
             return sourceFile.text.substring(this.getStart(sourceFile), this.getEnd());
         }
 
-        private addSyntheticNodes(nodes: Node[], pos: number, end: number): number {
-            scanner.setTextPos(pos);
-            while (pos < end) {
-                const token = scanner.scan();
-                Debug.assert(token !== SyntaxKind.EndOfFileToken); // Else it would infinitely loop
-                const textPos = scanner.getTextPos();
-                if (textPos <= end) {
-                    nodes.push(createNode(token, pos, textPos, this));
-                }
-                pos = textPos;
-            }
-            return pos;
-        }
-
-        private createSyntaxList(nodes: NodeArray<Node>): Node {
-            const list = <NodeObject>createNode(SyntaxKind.SyntaxList, nodes.pos, nodes.end, this);
-            list._children = [];
-            let pos = nodes.pos;
-
-            for (const node of nodes) {
-                if (pos < node.pos) {
-                    pos = this.addSyntheticNodes(list._children, pos, node.pos);
-                }
-                list._children.push(node);
-                pos = node.end;
-            }
-            if (pos < nodes.end) {
-                this.addSyntheticNodes(list._children, pos, nodes.end);
-            }
-            return list;
-        }
-
-        private createChildren(sourceFile?: SourceFileLike) {
-            if (!isNodeKind(this.kind)) {
-                this._children = emptyArray;
-                return;
-            }
-
-            if (isJSDocCommentContainingNode(this)) {
-                /** Don't add trivia for "tokens" since this is in a comment. */
-                const children: Node[] = [];
-                this.forEachChild(child => { children.push(child); });
-                this._children = children;
-                return;
-            }
-
-            const children: Node[] = [];
-            scanner.setText((sourceFile || this.getSourceFile()).text);
-            let pos = this.pos;
-            const processNode = (node: Node) => {
-                pos = this.addSyntheticNodes(children, pos, node.pos);
-                children.push(node);
-                pos = node.end;
-            };
-            const processNodes = (nodes: NodeArray<Node>) => {
-                if (pos < nodes.pos) {
-                    pos = this.addSyntheticNodes(children, pos, nodes.pos);
-                }
-                children.push(this.createSyntaxList(nodes));
-                pos = nodes.end;
-            };
-            // jsDocComments need to be the first children
-            if (this.jsDoc) {
-                for (const jsDocComment of this.jsDoc) {
-                    processNode(jsDocComment);
-                }
-            }
-            // For syntactic classifications, all trivia are classcified together, including jsdoc comments.
-            // For that to work, the jsdoc comments should still be the leading trivia of the first child.
-            // Restoring the scanner position ensures that.
-            pos = this.pos;
-            forEachChild(this, processNode, processNodes);
-            if (pos < this.end) {
-                this.addSyntheticNodes(children, pos, this.end);
-            }
-            scanner.setText(undefined);
-            this._children = children;
-        }
-
-        public getChildCount(sourceFile?: SourceFile): number {
-            if (!this._children) this.createChildren(sourceFile);
-            return this._children.length;
-        }
-
-        public getChildAt(index: number, sourceFile?: SourceFile): Node {
-            if (!this._children) this.createChildren(sourceFile);
-            return this._children[index];
-        }
-
-        public getChildren(sourceFile?: SourceFileLike): Node[] {
-            if (!this._children) this.createChildren(sourceFile);
-            return this._children;
-        }
-
-        public getFirstToken(sourceFile?: SourceFile): Node {
-            const children = this.getChildren(sourceFile);
-            if (!children.length) {
-                return undefined;
-            }
-
-            const child = ts.find(children, kid => kid.kind < SyntaxKind.FirstJSDocNode || kid.kind > SyntaxKind.LastJSDocNode);
-            return child.kind < SyntaxKind.FirstNode ?
-                child :
-                child.getFirstToken(sourceFile);
-        }
-
-        public getLastToken(sourceFile?: SourceFile): Node {
-            const children = this.getChildren(sourceFile);
-
-            const child = lastOrUndefined(children);
-            if (!child) {
-                return undefined;
-            }
-
-            return child.kind < SyntaxKind.FirstNode ? child : child.getLastToken(sourceFile);
-        }
-
-        public forEachChild<T>(cbNode: (node: Node) => T, cbNodeArray?: (nodes: NodeArray<Node>) => T): T {
-            return forEachChild(this, cbNode, cbNodeArray);
-        }
-    }
-
-    class TokenOrIdentifierObject implements Node {
-        public kind: SyntaxKind;
-        public pos: number;
-        public end: number;
-        public flags: NodeFlags;
-        public parent: Node;
-        public jsDocComments: JSDoc[];
-
-        constructor(pos: number, end: number) {
-            // Set properties in same order as NodeObject
-            this.pos = pos;
-            this.end = end;
-            this.flags = NodeFlags.None;
-            this.parent = undefined;
-        }
-
-        public getSourceFile(): SourceFile {
-            return getSourceFileOfNode(this);
-        }
-
-        public getStart(sourceFile?: SourceFileLike, includeJsDocComment?: boolean): number {
-            return getTokenPosOfNode(this, sourceFile, includeJsDocComment);
-        }
-
-        public getFullStart(): number {
-            return this.pos;
-        }
-
-        public getEnd(): number {
-            return this.end;
-        }
-
-        public getWidth(sourceFile?: SourceFile): number {
-            return this.getEnd() - this.getStart(sourceFile);
-        }
-
-        public getFullWidth(): number {
-            return this.end - this.pos;
-        }
-
-        public getLeadingTriviaWidth(sourceFile?: SourceFile): number {
-            return this.getStart(sourceFile) - this.pos;
-        }
-
-        public getFullText(sourceFile?: SourceFile): string {
-            return (sourceFile || this.getSourceFile()).text.substring(this.pos, this.end);
-        }
-
-        public getText(sourceFile?: SourceFile): string {
-            return (sourceFile || this.getSourceFile()).text.substring(this.getStart(), this.getEnd());
-        }
-
         public getChildCount(): number {
             return 0;
         }
 
         public getChildAt(): Node {
-            return undefined;
+            return undefined!;  // TODO: GH#18217
         }
 
         public getChildren(): Node[] {
-            return emptyArray;
+            return this.kind === SyntaxKind.EndOfFileToken ? (this as EndOfFileToken).jsDoc || emptyArray : emptyArray;
         }
 
-        public getFirstToken(): Node {
+        public getFirstToken(): Node | undefined {
             return undefined;
         }
 
-        public getLastToken(): Node {
+        public getLastToken(): Node | undefined {
             return undefined;
         }
 
-        public forEachChild<T>(): T {
+        public forEachChild<T>(): T | undefined {
             return undefined;
         }
     }
@@ -305,7 +285,8 @@ namespace ts {
     class SymbolObject implements Symbol {
         flags: SymbolFlags;
         escapedName: __String;
-        declarations?: Declaration[];
+        declarations!: Declaration[];
+        valueDeclaration!: Declaration;
 
         // Undefined is used to indicate the value has not been computed. If, after computing, the
         // symbol has no doc comment, then the empty array will be returned.
@@ -325,7 +306,7 @@ namespace ts {
         }
 
         get name(): string {
-            return unescapeLeadingUnderscores(this.escapedName);
+            return symbolName(this);
         }
 
         getEscapedName(): __String {
@@ -340,11 +321,11 @@ namespace ts {
             return this.declarations;
         }
 
-        getDocumentationComment(): SymbolDisplayPart[] {
-            if (this.documentationComment === undefined) {
-                this.documentationComment = JsDoc.getJsDocCommentsFromDeclarations(this.declarations);
+        getDocumentationComment(checker: TypeChecker | undefined): SymbolDisplayPart[] {
+            if (!this.documentationComment) {
+                this.documentationComment = emptyArray; // Set temporarily to avoid an infinite loop finding inherited docs
+                this.documentationComment = getDocumentationComment(this.declarations, checker);
             }
-
             return this.documentationComment;
         }
 
@@ -358,6 +339,7 @@ namespace ts {
     }
 
     class TokenObject<TKind extends SyntaxKind> extends TokenOrIdentifierObject implements Token<TKind> {
+        public symbol!: Symbol;
         public kind: TKind;
 
         constructor(kind: TKind, pos: number, end: number) {
@@ -367,21 +349,24 @@ namespace ts {
     }
 
     class IdentifierObject extends TokenOrIdentifierObject implements Identifier {
-        public kind: SyntaxKind.Identifier;
-        public escapedText: __String;
+        public kind!: SyntaxKind.Identifier;
+        public escapedText!: __String;
+        public symbol!: Symbol;
+        public autoGenerateFlags!: GeneratedIdentifierFlags;
         _primaryExpressionBrand: any;
         _memberExpressionBrand: any;
         _leftHandSideExpressionBrand: any;
         _updateExpressionBrand: any;
         _unaryExpressionBrand: any;
         _expressionBrand: any;
-        /*@internal*/typeArguments: NodeArray<TypeNode>;
+        _declarationBrand: any;
+        /*@internal*/typeArguments!: NodeArray<TypeNode>;
         constructor(_kind: SyntaxKind.Identifier, pos: number, end: number) {
             super(pos, end);
         }
 
         get text(): string {
-            return unescapeLeadingUnderscores(this.escapedText);
+            return idText(this);
         }
     }
     IdentifierObject.prototype.kind = SyntaxKind.Identifier;
@@ -390,8 +375,8 @@ namespace ts {
         checker: TypeChecker;
         flags: TypeFlags;
         objectFlags?: ObjectFlags;
-        id: number;
-        symbol?: Symbol;
+        id!: number;
+        symbol!: Symbol;
         constructor(checker: TypeChecker, flags: TypeFlags) {
             this.checker = checker;
             this.flags = flags;
@@ -411,10 +396,10 @@ namespace ts {
         getApparentProperties(): Symbol[] {
             return this.checker.getAugmentedPropertiesOfType(this);
         }
-        getCallSignatures(): Signature[] {
+        getCallSignatures(): ReadonlyArray<Signature> {
             return this.checker.getSignaturesOfType(this, SignatureKind.Call);
         }
-        getConstructSignatures(): Signature[] {
+        getConstructSignatures(): ReadonlyArray<Signature> {
             return this.checker.getSignaturesOfType(this, SignatureKind.Construct);
         }
         getStringIndexType(): Type | undefined {
@@ -424,26 +409,59 @@ namespace ts {
             return this.checker.getIndexTypeOfType(this, IndexKind.Number);
         }
         getBaseTypes(): BaseType[] | undefined {
-            return this.flags & TypeFlags.Object && this.objectFlags & (ObjectFlags.Class | ObjectFlags.Interface)
-                ? this.checker.getBaseTypes(<InterfaceType><Type>this)
-                : undefined;
+            return this.isClassOrInterface() ? this.checker.getBaseTypes(this) : undefined;
         }
         getNonNullableType(): Type {
             return this.checker.getNonNullableType(this);
+        }
+        getConstraint(): Type | undefined {
+            return this.checker.getBaseConstraintOfType(this);
+        }
+        getDefault(): Type | undefined {
+            return this.checker.getDefaultFromTypeParameter(this);
+        }
+
+        isUnion(): this is UnionType {
+            return !!(this.flags & TypeFlags.Union);
+        }
+        isIntersection(): this is IntersectionType {
+            return !!(this.flags & TypeFlags.Intersection);
+        }
+        isUnionOrIntersection(): this is UnionOrIntersectionType {
+            return !!(this.flags & TypeFlags.UnionOrIntersection);
+        }
+        isLiteral(): this is LiteralType {
+            return !!(this.flags & TypeFlags.StringOrNumberLiteral);
+        }
+        isStringLiteral(): this is StringLiteralType {
+            return !!(this.flags & TypeFlags.StringLiteral);
+        }
+        isNumberLiteral(): this is NumberLiteralType {
+            return !!(this.flags & TypeFlags.NumberLiteral);
+        }
+        isTypeParameter(): this is TypeParameter {
+            return !!(this.flags & TypeFlags.TypeParameter);
+        }
+        isClassOrInterface(): this is InterfaceType {
+            return !!(getObjectFlags(this) & ObjectFlags.ClassOrInterface);
+        }
+        isClass(): this is InterfaceType {
+            return !!(getObjectFlags(this) & ObjectFlags.Class);
         }
     }
 
     class SignatureObject implements Signature {
         checker: TypeChecker;
-        declaration: SignatureDeclaration;
+        declaration!: SignatureDeclaration;
         typeParameters?: TypeParameter[];
-        parameters: Symbol[];
-        thisParameter: Symbol;
-        resolvedReturnType: Type;
-        minTypeArgumentCount: number;
-        minArgumentCount: number;
-        hasRestParameter: boolean;
-        hasLiteralTypes: boolean;
+        parameters!: Symbol[];
+        thisParameter!: Symbol;
+        resolvedReturnType!: Type;
+        resolvedTypePredicate: TypePredicate | undefined;
+        minTypeArgumentCount!: number;
+        minArgumentCount!: number;
+        hasRestParameter!: boolean;
+        hasLiteralTypes!: boolean;
 
         // Undefined is used to indicate the value has not been computed. If, after computing, the
         // symbol has no doc comment, then the empty array will be returned.
@@ -470,11 +488,7 @@ namespace ts {
         }
 
         getDocumentationComment(): SymbolDisplayPart[] {
-            if (this.documentationComment === undefined) {
-                this.documentationComment = this.declaration ? JsDoc.getJsDocCommentsFromDeclarations([this.declaration]) : [];
-            }
-
-            return this.documentationComment;
+            return this.documentationComment || (this.documentationComment = getDocumentationComment(singleElementArray(this.declaration), this.checker));
         }
 
         getJsDocTags(): JSDocTagInfo[] {
@@ -486,50 +500,96 @@ namespace ts {
         }
     }
 
+    /**
+     * Returns whether or not the given node has a JSDoc "inheritDoc" tag on it.
+     * @param node the Node in question.
+     * @returns `true` if `node` has a JSDoc "inheritDoc" tag on it, otherwise `false`.
+     */
+    function hasJSDocInheritDocTag(node: Node) {
+        return getJSDocTags(node).some(tag => tag.tagName.text === "inheritDoc");
+    }
+
+    function getDocumentationComment(declarations: ReadonlyArray<Declaration> | undefined, checker: TypeChecker | undefined): SymbolDisplayPart[] {
+        if (!declarations) return emptyArray;
+
+        let doc = JsDoc.getJsDocCommentsFromDeclarations(declarations);
+        if (doc.length === 0 || declarations.some(hasJSDocInheritDocTag)) {
+            for (const declaration of declarations) {
+                const inheritedDocs = findInheritedJSDocComments(declaration, declaration.symbol.name, checker!); // TODO: GH#18217
+                // TODO: GH#16312 Return a ReadonlyArray, avoid copying inheritedDocs
+                if (inheritedDocs) doc = doc.length === 0 ? inheritedDocs.slice() : inheritedDocs.concat(lineBreakPart(), doc);
+            }
+        }
+        return doc;
+    }
+
+    /**
+     * Attempts to find JSDoc comments for possibly-inherited properties.  Checks superclasses then traverses
+     * implemented interfaces until a symbol is found with the same name and with documentation.
+     * @param declaration The possibly-inherited declaration to find comments for.
+     * @param propertyName The name of the possibly-inherited property.
+     * @param typeChecker A TypeChecker, used to find inherited properties.
+     * @returns A filled array of documentation comments if any were found, otherwise an empty array.
+     */
+    function findInheritedJSDocComments(declaration: Declaration, propertyName: string, typeChecker: TypeChecker): ReadonlyArray<SymbolDisplayPart> | undefined {
+        return firstDefined(declaration.parent ? getAllSuperTypeNodes(declaration.parent) : emptyArray, superTypeNode => {
+            const superType = typeChecker.getTypeAtLocation(superTypeNode);
+            const baseProperty = superType && typeChecker.getPropertyOfType(superType, propertyName);
+            const inheritedDocs = baseProperty && baseProperty.getDocumentationComment(typeChecker);
+            return inheritedDocs && inheritedDocs.length ? inheritedDocs : undefined;
+        });
+    }
+
     class SourceFileObject extends NodeObject implements SourceFile {
-        public kind: SyntaxKind.SourceFile;
+        public kind!: SyntaxKind.SourceFile;
         public _declarationBrand: any;
-        public fileName: string;
-        public path: Path;
-        public text: string;
-        public scriptSnapshot: IScriptSnapshot;
-        public lineMap: number[];
+        public fileName!: string;
+        public path!: Path;
+        public resolvedPath!: Path;
+        public originalFileName!: string;
+        public text!: string;
+        public scriptSnapshot!: IScriptSnapshot;
+        public lineMap!: ReadonlyArray<number>;
 
-        public statements: NodeArray<Statement>;
-        public endOfFileToken: Token<SyntaxKind.EndOfFileToken>;
+        public statements!: NodeArray<Statement>;
+        public endOfFileToken!: Token<SyntaxKind.EndOfFileToken>;
 
-        public amdDependencies: { name: string; path: string }[];
-        public moduleName: string;
-        public referencedFiles: FileReference[];
-        public typeReferenceDirectives: FileReference[];
+        public amdDependencies!: { name: string; path: string }[];
+        public moduleName!: string;
+        public referencedFiles!: FileReference[];
+        public typeReferenceDirectives!: FileReference[];
+        public libReferenceDirectives!: FileReference[];
 
-        public syntacticDiagnostics: Diagnostic[];
-        public referenceDiagnostics: Diagnostic[];
-        public parseDiagnostics: Diagnostic[];
-        public bindDiagnostics: Diagnostic[];
+        public syntacticDiagnostics!: DiagnosticWithLocation[];
+        public parseDiagnostics!: DiagnosticWithLocation[];
+        public bindDiagnostics!: DiagnosticWithLocation[];
+        public bindSuggestionDiagnostics?: DiagnosticWithLocation[];
 
-        public isDeclarationFile: boolean;
-        public isDefaultLib: boolean;
-        public hasNoDefaultLib: boolean;
-        public externalModuleIndicator: Node; // The first node that causes this file to be an external module
-        public commonJsModuleIndicator: Node; // The first node that causes this file to be a CommonJS module
-        public nodeCount: number;
-        public identifierCount: number;
-        public symbolCount: number;
-        public version: string;
-        public scriptKind: ScriptKind;
-        public languageVersion: ScriptTarget;
-        public languageVariant: LanguageVariant;
-        public identifiers: Map<string>;
-        public nameTable: UnderscoreEscapedMap<number>;
-        public resolvedModules: Map<ResolvedModuleFull>;
-        public resolvedTypeReferenceDirectiveNames: Map<ResolvedTypeReferenceDirective>;
-        public imports: StringLiteral[];
-        public moduleAugmentations: StringLiteral[];
-        private namedDeclarations: Map<Declaration[]>;
-        public ambientModuleNames: string[];
+        public isDeclarationFile!: boolean;
+        public isDefaultLib!: boolean;
+        public hasNoDefaultLib!: boolean;
+        public externalModuleIndicator!: Node; // The first node that causes this file to be an external module
+        public commonJsModuleIndicator!: Node; // The first node that causes this file to be a CommonJS module
+        public nodeCount!: number;
+        public identifierCount!: number;
+        public symbolCount!: number;
+        public version!: string;
+        public scriptKind!: ScriptKind;
+        public languageVersion!: ScriptTarget;
+        public languageVariant!: LanguageVariant;
+        public identifiers!: Map<string>;
+        public nameTable: UnderscoreEscapedMap<number> | undefined;
+        public resolvedModules: Map<ResolvedModuleFull> | undefined;
+        public resolvedTypeReferenceDirectiveNames!: Map<ResolvedTypeReferenceDirective>;
+        public imports!: ReadonlyArray<StringLiteralLike>;
+        public moduleAugmentations!: StringLiteral[];
+        private namedDeclarations: Map<Declaration[]> | undefined;
+        public ambientModuleNames!: string[];
         public checkJsDirective: CheckJsDirective | undefined;
-        public possiblyContainDynamicImport: boolean;
+        public possiblyContainDynamicImport?: boolean;
+        public pragmas!: PragmaMap;
+        public localJsxFactory: EntityName | undefined;
+        public localJsxNamespace: __String | undefined;
 
         constructor(kind: SyntaxKind, pos: number, end: number) {
             super(kind, pos, end);
@@ -540,22 +600,22 @@ namespace ts {
         }
 
         public getLineAndCharacterOfPosition(position: number): LineAndCharacter {
-            return ts.getLineAndCharacterOfPosition(this, position);
+            return getLineAndCharacterOfPosition(this, position);
         }
 
-        public getLineStarts(): number[] {
+        public getLineStarts(): ReadonlyArray<number> {
             return getLineStarts(this);
         }
 
-        public getPositionOfLineAndCharacter(line: number, character: number): number {
-            return ts.getPositionOfLineAndCharacter(this, line, character);
+        public getPositionOfLineAndCharacter(line: number, character: number, allowEdits?: true): number {
+            return computePositionOfLineAndCharacter(getLineStarts(this), line, character, this.text, allowEdits);
         }
 
         public getLineEndOfPosition(pos: number): number {
             const { line } = this.getLineAndCharacterOfPosition(pos);
             const lineStarts = this.getLineStarts();
 
-            let lastCharPos: number;
+            let lastCharPos: number | undefined;
             if (line + 1 >= lineStarts.length) {
                 lastCharPos = this.getEnd();
             }
@@ -579,7 +639,7 @@ namespace ts {
         private computeNamedDeclarations(): Map<Declaration[]> {
             const result = createMultiMap<Declaration>();
 
-            forEachChild(this, visit);
+            this.forEachChild(visit);
 
             return result;
 
@@ -599,24 +659,9 @@ namespace ts {
             }
 
             function getDeclarationName(declaration: Declaration) {
-                const name = getNameOfDeclaration(declaration);
-                if (name) {
-                    const result = getTextOfIdentifierOrLiteral(name as (Identifier | LiteralExpression));
-                    if (result !== undefined) {
-                        return result;
-                    }
-
-                    if (name.kind === SyntaxKind.ComputedPropertyName) {
-                        const expr = (<ComputedPropertyName>name).expression;
-                        if (expr.kind === SyntaxKind.PropertyAccessExpression) {
-                            return (<PropertyAccessExpression>expr).name.text;
-                        }
-
-                        return getTextOfIdentifierOrLiteral(expr as (Identifier | LiteralExpression));
-                    }
-                }
-
-                return undefined;
+                const name = getNonAssignedNameOfDeclaration(declaration);
+                return name && (isComputedPropertyName(name) && isPropertyAccessExpression(name.expression) ? name.expression.name.text
+                    : isPropertyName(name) ? getNameFromPropertyName(name) : undefined);
             }
 
             function visit(node: Node): void {
@@ -670,7 +715,7 @@ namespace ts {
                         if (!hasModifier(node, ModifierFlags.ParameterPropertyModifier)) {
                             break;
                         }
-                        // falls through
+                    // falls through
                     case SyntaxKind.VariableDeclaration:
                     case SyntaxKind.BindingElement: {
                         const decl = <VariableDeclaration>node;
@@ -682,7 +727,7 @@ namespace ts {
                             visit(decl.initializer);
                         }
                     }
-                        // falls through
+                    // falls through
                     case SyntaxKind.EnumMember:
                     case SyntaxKind.PropertyDeclaration:
                     case SyntaxKind.PropertySignature:
@@ -693,7 +738,7 @@ namespace ts {
                         // Handle named exports case e.g.:
                         //    export {a, b as B} from "mod";
                         if ((<ExportDeclaration>node).exportClause) {
-                            forEach((<ExportDeclaration>node).exportClause.elements, visit);
+                            forEach((<ExportDeclaration>node).exportClause!.elements, visit);
                         }
                         break;
 
@@ -703,7 +748,7 @@ namespace ts {
                             // Handle default import case e.g.:
                             //    import d from "mod";
                             if (importClause.name) {
-                                addDeclaration(importClause);
+                                addDeclaration(importClause.name);
                             }
 
                             // Handle named bindings in imports e.g.:
@@ -711,14 +756,20 @@ namespace ts {
                             //    import {a, b as B} from "mod";
                             if (importClause.namedBindings) {
                                 if (importClause.namedBindings.kind === SyntaxKind.NamespaceImport) {
-                                    addDeclaration(<NamespaceImport>importClause.namedBindings);
+                                    addDeclaration(importClause.namedBindings);
                                 }
                                 else {
-                                    forEach((<NamedImports>importClause.namedBindings).elements, visit);
+                                    forEach(importClause.namedBindings.elements, visit);
                                 }
                             }
                         }
                         break;
+
+                    case SyntaxKind.BinaryExpression:
+                        if (getAssignmentDeclarationKind(node as BinaryExpression) !== AssignmentDeclarationKind.None) {
+                            addDeclaration(node as BinaryExpression);
+                        }
+                    // falls through
 
                     default:
                         forEachChild(node, visit);
@@ -728,11 +779,11 @@ namespace ts {
     }
 
     class SourceMapSourceObject implements SourceMapSource {
-        lineMap: number[];
-        constructor (public fileName: string, public text: string, public skipTrivia?: (pos: number) => number) {}
+        lineMap!: number[];
+        constructor(public fileName: string, public text: string, public skipTrivia?: (pos: number) => number) { }
 
         public getLineAndCharacterOfPosition(pos: number): LineAndCharacter {
-            return ts.getLineAndCharacterOfPosition(this, pos);
+            return getLineAndCharacterOfPosition(this, pos);
         }
     }
 
@@ -760,7 +811,8 @@ namespace ts {
         scriptKind: ScriptKind;
     }
 
-    export interface DisplayPartsSymbolWriter extends SymbolWriter {
+    /* @internal */
+    export interface DisplayPartsSymbolWriter extends EmitTextWriter {
         displayParts(): SymbolDisplayPart[];
     }
 
@@ -792,7 +844,7 @@ namespace ts {
         return !s.length || s.charAt(0) === s.charAt(0).toLowerCase();
     }
 
-    export function displayPartsToString(displayParts: SymbolDisplayPart[]) {
+    export function displayPartsToString(displayParts: SymbolDisplayPart[] | undefined) {
         if (displayParts) {
             return map(displayParts, displayPart => displayPart.text).join("");
         }
@@ -812,18 +864,21 @@ namespace ts {
         return codefix.getSupportedErrorCodes();
     }
 
+    // Either it will be file name if host doesnt have file or it will be the host's file information
+    type CachedHostFileInformation = HostFileInformation | string;
+
     // Cache host information about script Should be refreshed
     // at each language service public entry point, since we don't know when
     // the set of scripts handled by the host changes.
     class HostCache {
-        private fileNameToEntry: Map<HostFileInformation>;
+        private fileNameToEntry: Map<CachedHostFileInformation>;
         private _compilationSettings: CompilerOptions;
         private currentDirectory: string;
 
-        constructor(private host: LanguageServiceHost, getCanonicalFileName: (fileName: string) => string) {
+        constructor(private host: LanguageServiceHost, getCanonicalFileName: GetCanonicalFileName) {
             // script id => script index
             this.currentDirectory = host.getCurrentDirectory();
-            this.fileNameToEntry = createMap<HostFileInformation>();
+            this.fileNameToEntry = createMap<CachedHostFileInformation>();
 
             // Initialize the list with the root file names
             const rootFileNames = host.getScriptFileNames();
@@ -839,8 +894,12 @@ namespace ts {
             return this._compilationSettings;
         }
 
+        public getProjectReferences(): ReadonlyArray<ProjectReference> | undefined {
+            return this.host.getProjectReferences && this.host.getProjectReferences();
+        }
+
         private createEntry(fileName: string, path: Path) {
-            let entry: HostFileInformation;
+            let entry: CachedHostFileInformation;
             const scriptSnapshot = this.host.getScriptSnapshot(fileName);
             if (scriptSnapshot) {
                 entry = {
@@ -850,55 +909,61 @@ namespace ts {
                     scriptKind: getScriptKind(fileName, this.host)
                 };
             }
+            else {
+                entry = fileName;
+            }
 
             this.fileNameToEntry.set(path, entry);
             return entry;
         }
 
-        public getEntryByPath(path: Path): HostFileInformation {
+        public getEntryByPath(path: Path): CachedHostFileInformation | undefined {
             return this.fileNameToEntry.get(path);
         }
 
-        public containsEntryByPath(path: Path): boolean {
-            return this.fileNameToEntry.has(path);
+        public getHostFileInformation(path: Path): HostFileInformation | undefined {
+            const entry = this.fileNameToEntry.get(path);
+            return !isString(entry) ? entry : undefined;
         }
 
         public getOrCreateEntryByPath(fileName: string, path: Path): HostFileInformation {
-            return this.containsEntryByPath(path)
-                ? this.getEntryByPath(path)
-                : this.createEntry(fileName, path);
+            const info = this.getEntryByPath(path) || this.createEntry(fileName, path);
+            return isString(info) ? undefined! : info; // TODO: GH#18217
         }
 
         public getRootFileNames(): string[] {
-            const fileNames: string[] = [];
-
-            this.fileNameToEntry.forEach(value => {
-                if (value) {
-                    fileNames.push(value.hostFileName);
+            const names: string[] = [];
+            this.fileNameToEntry.forEach(entry => {
+                if (isString(entry)) {
+                    names.push(entry);
+                }
+                else {
+                    if (entry.scriptKind !== ScriptKind.JSON) {
+                        names.push(entry.hostFileName);
+                    }
                 }
             });
-
-            return fileNames;
+            return names;
         }
 
         public getVersion(path: Path): string {
-            const file = this.getEntryByPath(path);
-            return file && file.version;
+            const file = this.getHostFileInformation(path);
+            return (file && file.version)!; // TODO: GH#18217
         }
 
         public getScriptSnapshot(path: Path): IScriptSnapshot {
-            const file = this.getEntryByPath(path);
-            return file && file.scriptSnapshot;
+            const file = this.getHostFileInformation(path);
+            return (file && file.scriptSnapshot)!; // TODO: GH#18217
         }
     }
 
     class SyntaxTreeCache {
         // For our syntactic only features, we also keep a cache of the syntax tree for the
         // currently edited file.
-        private currentFileName: string;
-        private currentFileVersion: string;
-        private currentFileScriptSnapshot: IScriptSnapshot;
-        private currentSourceFile: SourceFile;
+        private currentFileName: string | undefined;
+        private currentFileVersion: string | undefined;
+        private currentFileScriptSnapshot: IScriptSnapshot | undefined;
+        private currentSourceFile: SourceFile | undefined;
 
         constructor(private host: LanguageServiceHost) {
         }
@@ -912,7 +977,7 @@ namespace ts {
 
             const scriptKind = getScriptKind(fileName, this.host);
             const version = this.host.getScriptVersion(fileName);
-            let sourceFile: SourceFile;
+            let sourceFile: SourceFile | undefined;
 
             if (this.currentFileName !== fileName) {
                 // This is a new file, just parse it
@@ -920,8 +985,8 @@ namespace ts {
             }
             else if (this.currentFileVersion !== version) {
                 // This is the same file, just a newer version. Incrementally parse the file.
-                const editRange = scriptSnapshot.getChangeRange(this.currentFileScriptSnapshot);
-                sourceFile = updateLanguageServiceSourceFile(this.currentSourceFile, scriptSnapshot, version, editRange);
+                const editRange = scriptSnapshot.getChangeRange(this.currentFileScriptSnapshot!);
+                sourceFile = updateLanguageServiceSourceFile(this.currentSourceFile!, scriptSnapshot, version, editRange);
             }
 
             if (sourceFile) {
@@ -932,7 +997,7 @@ namespace ts {
                 this.currentSourceFile = sourceFile;
             }
 
-            return this.currentSourceFile;
+            return this.currentSourceFile!;
         }
     }
 
@@ -942,15 +1007,14 @@ namespace ts {
     }
 
     export function createLanguageServiceSourceFile(fileName: string, scriptSnapshot: IScriptSnapshot, scriptTarget: ScriptTarget, version: string, setNodeParents: boolean, scriptKind?: ScriptKind): SourceFile {
-        const text = scriptSnapshot.getText(0, scriptSnapshot.getLength());
-        const sourceFile = createSourceFile(fileName, text, scriptTarget, setNodeParents, scriptKind);
+        const sourceFile = createSourceFile(fileName, getSnapshotText(scriptSnapshot), scriptTarget, setNodeParents, scriptKind);
         setSourceFileFields(sourceFile, scriptSnapshot, version);
         return sourceFile;
     }
 
     export let disableIncrementalParsing = false;
 
-    export function updateLanguageServiceSourceFile(sourceFile: SourceFile, scriptSnapshot: IScriptSnapshot, version: string, textChangeRange: TextChangeRange, aggressiveChecks?: boolean): SourceFile {
+    export function updateLanguageServiceSourceFile(sourceFile: SourceFile, scriptSnapshot: IScriptSnapshot, version: string, textChangeRange: TextChangeRange | undefined, aggressiveChecks?: boolean): SourceFile {
         // If we were given a text change range, and our version or open-ness changed, then
         // incrementally parse this file.
         if (textChangeRange) {
@@ -1009,11 +1073,11 @@ namespace ts {
     }
 
     class CancellationTokenObject implements CancellationToken {
-        constructor(private cancellationToken: HostCancellationToken) {
+        constructor(private cancellationToken: HostCancellationToken | undefined) {
         }
 
-        public isCancellationRequested() {
-            return this.cancellationToken && this.cancellationToken.isCancellationRequested();
+        public isCancellationRequested(): boolean {
+            return !!this.cancellationToken && this.cancellationToken.isCancellationRequested();
         }
 
         public throwIfCancellationRequested(): void {
@@ -1053,16 +1117,16 @@ namespace ts {
         }
     }
 
-    export function createLanguageService(host: LanguageServiceHost,
-        documentRegistry: DocumentRegistry = createDocumentRegistry(host.useCaseSensitiveFileNames && host.useCaseSensitiveFileNames(), host.getCurrentDirectory())): LanguageService {
+    export function createLanguageService(
+        host: LanguageServiceHost,
+        documentRegistry: DocumentRegistry = createDocumentRegistry(host.useCaseSensitiveFileNames && host.useCaseSensitiveFileNames(), host.getCurrentDirectory()),
+        syntaxOnly = false): LanguageService {
 
         const syntaxTreeCache: SyntaxTreeCache = new SyntaxTreeCache(host);
-        ruleProvider = ruleProvider || new formatting.RulesProvider();
         let program: Program;
         let lastProjectVersion: string;
         let lastTypesRootVersion = 0;
 
-        const useCaseSensitivefileNames = host.useCaseSensitiveFileNames && host.useCaseSensitiveFileNames();
         const cancellationToken = new CancellationTokenObject(host.getCancellationToken && host.getCancellationToken());
 
         const currentDirectory = host.getCurrentDirectory();
@@ -1077,7 +1141,19 @@ namespace ts {
             }
         }
 
-        const getCanonicalFileName = createGetCanonicalFileName(useCaseSensitivefileNames);
+        const useCaseSensitiveFileNames = hostUsesCaseSensitiveFileNames(host);
+        const getCanonicalFileName = createGetCanonicalFileName(useCaseSensitiveFileNames);
+
+        const sourceMapper = getSourceMapper({
+            useCaseSensitiveFileNames: () => useCaseSensitiveFileNames,
+            getCurrentDirectory: () => currentDirectory,
+            getProgram,
+            fileExists: host.fileExists && (f => host.fileExists!(f)),
+            readFile: host.readFile && ((f, encoding) => host.readFile!(f, encoding)),
+            getDocumentPositionMapper: host.getDocumentPositionMapper && ((generatedFileName, sourceFileName) => host.getDocumentPositionMapper!(generatedFileName, sourceFileName)),
+            getSourceFileLike: host.getSourceFileLike && (f => host.getSourceFileLike!(f)),
+            log
+        });
 
         function getValidSourceFile(fileName: string): SourceFile {
             const sourceFile = program.getSourceFile(fileName);
@@ -1087,17 +1163,14 @@ namespace ts {
             return sourceFile;
         }
 
-        function getRuleProvider(options: FormatCodeSettings) {
-            ruleProvider.ensureUpToDate(options);
-            return ruleProvider;
-        }
-
         function synchronizeHostData(): void {
+            Debug.assert(!syntaxOnly);
+
             // perform fast check if host supports it
             if (host.getProjectVersion) {
                 const hostProjectVersion = host.getProjectVersion();
                 if (hostProjectVersion) {
-                    if (lastProjectVersion === hostProjectVersion) {
+                    if (lastProjectVersion === hostProjectVersion && !host.hasChangedAutomaticTypeDirectiveNames) {
                         return;
                     }
 
@@ -1108,15 +1181,19 @@ namespace ts {
             const typeRootsVersion = host.getTypeRootsVersion ? host.getTypeRootsVersion() : 0;
             if (lastTypesRootVersion !== typeRootsVersion) {
                 log("TypeRoots version has changed; provide new program");
-                program = undefined;
+                program = undefined!; // TODO: GH#18217
                 lastTypesRootVersion = typeRootsVersion;
             }
 
             // Get a fresh cache of the host information
-            let hostCache = new HostCache(host, getCanonicalFileName);
+            let hostCache: HostCache | undefined = new HostCache(host, getCanonicalFileName);
+            const rootFileNames = hostCache.getRootFileNames();
+
+            const hasInvalidatedResolution: HasInvalidatedResolution = host.hasInvalidatedResolution || returnFalse;
+            const projectReferences = hostCache.getProjectReferences();
 
             // If the program is already up-to-date, we can reuse it
-            if (programUpToDate()) {
+            if (isProgramUptoDate(program, rootFileNames, hostCache.compilationSettings(), path => hostCache!.getVersion(path), fileExists, hasInvalidatedResolution, !!host.hasChangedAutomaticTypeDirectiveNames, projectReferences)) {
                 return;
             }
 
@@ -1126,18 +1203,7 @@ namespace ts {
             // the program points to old source files that have been invalidated because of
             // incremental parsing.
 
-            const oldSettings = program && program.getCompilerOptions();
             const newSettings = hostCache.compilationSettings();
-            const shouldCreateNewSourceFiles = oldSettings &&
-                (oldSettings.target !== newSettings.target ||
-                 oldSettings.module !== newSettings.module ||
-                 oldSettings.moduleResolution !== newSettings.moduleResolution ||
-                 oldSettings.noResolve !== newSettings.noResolve ||
-                 oldSettings.jsx !== newSettings.jsx ||
-                 oldSettings.allowJs !== newSettings.allowJs ||
-                 oldSettings.disableSizeLimit !== oldSettings.disableSizeLimit ||
-                 oldSettings.baseUrl !== newSettings.baseUrl ||
-                 !equalOwnProperties(oldSettings.paths, newSettings.paths));
 
             // Now create a new compiler
             const compilerHost: CompilerHost = {
@@ -1145,83 +1211,100 @@ namespace ts {
                 getSourceFileByPath: getOrCreateSourceFileByPath,
                 getCancellationToken: () => cancellationToken,
                 getCanonicalFileName,
-                useCaseSensitiveFileNames: () => useCaseSensitivefileNames,
-                getNewLine: () => getNewLineOrDefaultFromHost(host),
+                useCaseSensitiveFileNames: () => useCaseSensitiveFileNames,
+                getNewLine: () => getNewLineCharacter(newSettings, () => getNewLineOrDefaultFromHost(host)),
                 getDefaultLibFileName: (options) => host.getDefaultLibFileName(options),
                 writeFile: noop,
                 getCurrentDirectory: () => currentDirectory,
-                fileExists: (fileName): boolean => {
-                    // stub missing host functionality
-                    const path = toPath(fileName, currentDirectory, getCanonicalFileName);
-                    return hostCache.containsEntryByPath(path) ?
-                        !!hostCache.getEntryByPath(path) :
-                        (host.fileExists && host.fileExists(fileName));
-                },
-                readFile(fileName) {
-                    // stub missing host functionality
-                    const path = toPath(fileName, currentDirectory, getCanonicalFileName);
-                    if (hostCache.containsEntryByPath(path)) {
-                        const entry = hostCache.getEntryByPath(path);
-                        return entry && entry.scriptSnapshot.getText(0, entry.scriptSnapshot.getLength());
-                    }
-                    return host.readFile && host.readFile(fileName);
-                },
+                fileExists,
+                readFile,
+                realpath: host.realpath && (path => host.realpath!(path)),
                 directoryExists: directoryName => {
                     return directoryProbablyExists(directoryName, host);
                 },
                 getDirectories: path => {
                     return host.getDirectories ? host.getDirectories(path) : [];
-                }
+                },
+                readDirectory(path, extensions, exclude, include, depth) {
+                    Debug.assertDefined(host.readDirectory, "'LanguageServiceHost.readDirectory' must be implemented to correctly process 'projectReferences'");
+                    return host.readDirectory!(path, extensions, exclude, include, depth);
+                },
+                onReleaseOldSourceFile,
+                hasInvalidatedResolution,
+                hasChangedAutomaticTypeDirectiveNames: host.hasChangedAutomaticTypeDirectiveNames
             };
             if (host.trace) {
-                compilerHost.trace = message => host.trace(message);
+                compilerHost.trace = message => host.trace!(message);
             }
 
             if (host.resolveModuleNames) {
-                compilerHost.resolveModuleNames = (moduleNames, containingFile) => host.resolveModuleNames(moduleNames, containingFile);
+                compilerHost.resolveModuleNames = (moduleNames, containingFile, reusedNames, redirectedReference) => host.resolveModuleNames!(moduleNames, containingFile, reusedNames, redirectedReference);
             }
             if (host.resolveTypeReferenceDirectives) {
-                compilerHost.resolveTypeReferenceDirectives = (typeReferenceDirectiveNames, containingFile) => {
-                    return host.resolveTypeReferenceDirectives(typeReferenceDirectiveNames, containingFile);
+                compilerHost.resolveTypeReferenceDirectives = (typeReferenceDirectiveNames, containingFile, redirectedReference) => {
+                    return host.resolveTypeReferenceDirectives!(typeReferenceDirectiveNames, containingFile, redirectedReference);
                 };
             }
 
             const documentRegistryBucketKey = documentRegistry.getKeyForCompilationSettings(newSettings);
-            const newProgram = createProgram(hostCache.getRootFileNames(), newSettings, compilerHost, program);
-
-            // Release any files we have acquired in the old program but are
-            // not part of the new program.
-            if (program) {
-                const oldSourceFiles = program.getSourceFiles();
-                const oldSettingsKey = documentRegistry.getKeyForCompilationSettings(oldSettings);
-                for (const oldSourceFile of oldSourceFiles) {
-                    if (!newProgram.getSourceFile(oldSourceFile.fileName) || shouldCreateNewSourceFiles) {
-                        documentRegistry.releaseDocumentWithKey(oldSourceFile.path, oldSettingsKey);
-                    }
-                }
-            }
+            const options: CreateProgramOptions = {
+                rootNames: rootFileNames,
+                options: newSettings,
+                host: compilerHost,
+                oldProgram: program,
+                projectReferences
+            };
+            program = createProgram(options);
 
             // hostCache is captured in the closure for 'getOrCreateSourceFile' but it should not be used past this point.
             // It needs to be cleared to allow all collected snapshots to be released
             hostCache = undefined;
 
-            program = newProgram;
+            // We reset this cache on structure invalidation so we don't hold on to outdated files for long; however we can't use the `compilerHost` above,
+            // Because it only functions until `hostCache` is cleared, while we'll potentially need the functionality to lazily read sourcemap files during
+            // the course of whatever called `synchronizeHostData`
+            sourceMapper.clearCache();
 
             // Make sure all the nodes in the program are both bound, and have their parent
             // pointers set property.
             program.getTypeChecker();
             return;
 
-            function getOrCreateSourceFile(fileName: string): SourceFile {
-                return getOrCreateSourceFileByPath(fileName, toPath(fileName, currentDirectory, getCanonicalFileName));
+            function fileExists(fileName: string): boolean {
+                const path = toPath(fileName, currentDirectory, getCanonicalFileName);
+                const entry = hostCache && hostCache.getEntryByPath(path);
+                return entry ?
+                    !isString(entry) :
+                    (!!host.fileExists && host.fileExists(fileName));
             }
 
-            function getOrCreateSourceFileByPath(fileName: string, path: Path): SourceFile {
-                Debug.assert(hostCache !== undefined);
+            function readFile(fileName: string) {
+                // stub missing host functionality
+                const path = toPath(fileName, currentDirectory, getCanonicalFileName);
+                const entry = hostCache && hostCache.getEntryByPath(path);
+                if (entry) {
+                    return isString(entry) ? undefined : getSnapshotText(entry.scriptSnapshot);
+                }
+                return host.readFile && host.readFile(fileName);
+            }
+
+            // Release any files we have acquired in the old program but are
+            // not part of the new program.
+            function onReleaseOldSourceFile(oldSourceFile: SourceFile, oldOptions: CompilerOptions) {
+                const oldSettingsKey = documentRegistry.getKeyForCompilationSettings(oldOptions);
+                documentRegistry.releaseDocumentWithKey(oldSourceFile.resolvedPath, oldSettingsKey);
+            }
+
+            function getOrCreateSourceFile(fileName: string, languageVersion: ScriptTarget, onError?: (message: string) => void, shouldCreateNewSourceFile?: boolean): SourceFile | undefined {
+                return getOrCreateSourceFileByPath(fileName, toPath(fileName, currentDirectory, getCanonicalFileName), languageVersion, onError, shouldCreateNewSourceFile);
+            }
+
+            function getOrCreateSourceFileByPath(fileName: string, path: Path, _languageVersion: ScriptTarget, _onError?: (message: string) => void, shouldCreateNewSourceFile?: boolean): SourceFile | undefined {
+                Debug.assert(hostCache !== undefined, "getOrCreateSourceFileByPath called after typical CompilerHost lifetime, check the callstack something with a reference to an old host.");
                 // The program is asking for this file, check first if the host can locate it.
                 // If the host can not locate the file, then it does not exist. return undefined
                 // to the program to allow reporting of errors for missing files.
-                const hostFileInformation = hostCache.getOrCreateEntryByPath(fileName, path);
+                const hostFileInformation = hostCache && hostCache.getOrCreateEntryByPath(fileName, path);
                 if (!hostFileInformation) {
                     return undefined;
                 }
@@ -1229,7 +1312,7 @@ namespace ts {
                 // Check if the language version has changed since we last created a program; if they are the same,
                 // it is safe to reuse the sourceFiles; if not, then the shape of the AST can change, and the oldSourceFile
                 // can not be reused. we have to dump all syntax trees and create new ones.
-                if (!shouldCreateNewSourceFiles) {
+                if (!shouldCreateNewSourceFile) {
                     // Check if the old program had this file already
                     const oldSourceFile = program && program.getSourceFileByPath(path);
                     if (oldSourceFile) {
@@ -1258,7 +1341,7 @@ namespace ts {
                         // We do not support the scenario where a host can modify a registered
                         // file's script kind, i.e. in one project some file is treated as ".ts"
                         // and in another as ".js"
-                        Debug.assert(hostFileInformation.scriptKind === oldSourceFile.scriptKind, "Registered script kind (" + oldSourceFile.scriptKind + ") should match new script kind (" + hostFileInformation.scriptKind + ") for file: " + path);
+                        Debug.assertEqual(hostFileInformation.scriptKind, oldSourceFile.scriptKind, "Registered script kind should match new script kind.", path);
 
                         return documentRegistry.updateDocumentWithKey(fileName, path, newSettings, documentRegistryBucketKey, hostFileInformation.scriptSnapshot, hostFileInformation.version, hostFileInformation.scriptKind);
                     }
@@ -1269,75 +1352,38 @@ namespace ts {
                 // Could not find this file in the old program, create a new SourceFile for it.
                 return documentRegistry.acquireDocumentWithKey(fileName, path, newSettings, documentRegistryBucketKey, hostFileInformation.scriptSnapshot, hostFileInformation.version, hostFileInformation.scriptKind);
             }
-
-            function sourceFileUpToDate(sourceFile: SourceFile): boolean {
-                if (!sourceFile) {
-                    return false;
-                }
-                const path = sourceFile.path || toPath(sourceFile.fileName, currentDirectory, getCanonicalFileName);
-                return sourceFile.version === hostCache.getVersion(path);
-            }
-
-            function programUpToDate(): boolean {
-                // If we haven't create a program yet, then it is not up-to-date
-                if (!program) {
-                    return false;
-                }
-
-                // If number of files in the program do not match, it is not up-to-date
-                const rootFileNames = hostCache.getRootFileNames();
-                if (program.getSourceFiles().length !== rootFileNames.length) {
-                    return false;
-                }
-
-                // If any file is not up-to-date, then the whole program is not up-to-date
-                for (const fileName of rootFileNames) {
-                    if (!sourceFileUpToDate(program.getSourceFile(fileName))) {
-                        return false;
-                    }
-                }
-
-                const currentOptions = program.getCompilerOptions();
-                const newOptions = hostCache.compilationSettings();
-                // If the compilation settings do no match, then the program is not up-to-date
-                if (!compareDataObjects(currentOptions, newOptions)) {
-                    return false;
-                }
-
-                // If everything matches but the text of config file is changed,
-                // error locations can change for program options, so update the program
-                if (currentOptions.configFile && newOptions.configFile) {
-                    return currentOptions.configFile.text === newOptions.configFile.text;
-                }
-
-                return true;
-            }
         }
 
-        function getProgram(): Program {
+        // TODO: GH#18217 frequently asserted as defined
+        function getProgram(): Program | undefined {
+            if (syntaxOnly) {
+                Debug.assert(program === undefined);
+                return undefined;
+            }
+
             synchronizeHostData();
 
             return program;
         }
 
         function cleanupSemanticCache(): void {
-            program = undefined;
+            program = undefined!; // TODO: GH#18217
         }
 
         function dispose(): void {
             if (program) {
                 forEach(program.getSourceFiles(), f =>
                     documentRegistry.releaseDocument(f.fileName, program.getCompilerOptions()));
-                program = undefined;
+                program = undefined!; // TODO: GH#18217
             }
-            host = undefined;
+            host = undefined!;
         }
 
         /// Diagnostics
-        function getSyntacticDiagnostics(fileName: string) {
+        function getSyntacticDiagnostics(fileName: string): DiagnosticWithLocation[] {
             synchronizeHostData();
 
-            return program.getSyntacticDiagnostics(getValidSourceFile(fileName), cancellationToken);
+            return program.getSyntacticDiagnostics(getValidSourceFile(fileName), cancellationToken).slice();
         }
 
         /**
@@ -1353,208 +1399,221 @@ namespace ts {
             // Therefore only get diagnostics for given file.
 
             const semanticDiagnostics = program.getSemanticDiagnostics(targetSourceFile, cancellationToken);
-            if (!program.getCompilerOptions().declaration) {
-                return semanticDiagnostics;
+            if (!getEmitDeclarations(program.getCompilerOptions())) {
+                return semanticDiagnostics.slice();
             }
 
             // If '-d' is enabled, check for emitter error. One example of emitter error is export class implements non-export interface
             const declarationDiagnostics = program.getDeclarationDiagnostics(targetSourceFile, cancellationToken);
-            return concatenate(semanticDiagnostics, declarationDiagnostics);
+            return [...semanticDiagnostics, ...declarationDiagnostics];
+        }
+
+        function getSuggestionDiagnostics(fileName: string): DiagnosticWithLocation[] {
+            synchronizeHostData();
+            return computeSuggestionDiagnostics(getValidSourceFile(fileName), program, cancellationToken);
         }
 
         function getCompilerOptionsDiagnostics() {
             synchronizeHostData();
-            return program.getOptionsDiagnostics(cancellationToken).concat(
-                   program.getGlobalDiagnostics(cancellationToken));
+            return [...program.getOptionsDiagnostics(cancellationToken), ...program.getGlobalDiagnostics(cancellationToken)];
         }
 
-        function getCompletionsAtPosition(fileName: string, position: number): CompletionInfo {
+        function getCompletionsAtPosition(fileName: string, position: number, options: GetCompletionsAtPositionOptions = emptyOptions): CompletionInfo | undefined {
+            // Convert from deprecated options names to new names
+            const fullPreferences: UserPreferences = {
+                ...identity<UserPreferences>(options), // avoid excess property check
+                includeCompletionsForModuleExports: options.includeCompletionsForModuleExports || options.includeExternalModuleExports,
+                includeCompletionsWithInsertText: options.includeCompletionsWithInsertText || options.includeInsertTextCompletions,
+            };
             synchronizeHostData();
-            return Completions.getCompletionsAtPosition(host, program.getTypeChecker(), log, program.getCompilerOptions(), getValidSourceFile(fileName), position);
+            return Completions.getCompletionsAtPosition(
+                host,
+                program,
+                log,
+                getValidSourceFile(fileName),
+                position,
+                fullPreferences,
+                options.triggerCharacter);
         }
 
-        function getCompletionEntryDetails(fileName: string, position: number, entryName: string): CompletionEntryDetails {
+        function getCompletionEntryDetails(fileName: string, position: number, name: string, formattingOptions: FormatCodeSettings | undefined, source: string | undefined, preferences: UserPreferences = emptyOptions): CompletionEntryDetails | undefined {
             synchronizeHostData();
-            return Completions.getCompletionEntryDetails(program.getTypeChecker(), log, program.getCompilerOptions(), getValidSourceFile(fileName), position, entryName);
+            return Completions.getCompletionEntryDetails(
+                program,
+                log,
+                getValidSourceFile(fileName),
+                position,
+                { name, source },
+                host,
+                (formattingOptions && formatting.getFormatContext(formattingOptions))!, // TODO: GH#18217
+                preferences,
+                cancellationToken,
+            );
         }
 
-        function getCompletionEntrySymbol(fileName: string, position: number, entryName: string): Symbol {
+        function getCompletionEntrySymbol(fileName: string, position: number, name: string, source?: string): Symbol | undefined {
             synchronizeHostData();
-            return Completions.getCompletionEntrySymbol(program.getTypeChecker(), log, program.getCompilerOptions(), getValidSourceFile(fileName), position, entryName);
+            return Completions.getCompletionEntrySymbol(program, log, getValidSourceFile(fileName), position, { name, source });
         }
 
-        function getQuickInfoAtPosition(fileName: string, position: number): QuickInfo {
+        function getQuickInfoAtPosition(fileName: string, position: number): QuickInfo | undefined {
             synchronizeHostData();
 
             const sourceFile = getValidSourceFile(fileName);
-            const node = getTouchingPropertyName(sourceFile, position, /*includeJsDocComment*/ true);
+            const node = getTouchingPropertyName(sourceFile, position);
             if (node === sourceFile) {
-                return undefined;
-            }
-
-            if (isLabelName(node)) {
+                // Avoid giving quickInfo for the sourceFile as a whole.
                 return undefined;
             }
 
             const typeChecker = program.getTypeChecker();
-            const symbol = typeChecker.getSymbolAtLocation(node);
+            const symbol = getSymbolAtLocationForQuickInfo(node, typeChecker);
 
             if (!symbol || typeChecker.isUnknownSymbol(symbol)) {
-                // Try getting just type at this position and show
-                switch (node.kind) {
-                    case SyntaxKind.Identifier:
-                    case SyntaxKind.PropertyAccessExpression:
-                    case SyntaxKind.QualifiedName:
-                    case SyntaxKind.ThisKeyword:
-                    case SyntaxKind.ThisType:
-                    case SyntaxKind.SuperKeyword:
-                        // For the identifiers/this/super etc get the type at position
-                        const type = typeChecker.getTypeAtLocation(node);
-                        if (type) {
-                            return {
-                                kind: ScriptElementKind.unknown,
-                                kindModifiers: ScriptElementKindModifier.none,
-                                textSpan: createTextSpan(node.getStart(), node.getWidth()),
-                                displayParts: typeToDisplayParts(typeChecker, type, getContainerNode(node)),
-                                documentation: type.symbol ? type.symbol.getDocumentationComment() : undefined,
-                                tags: type.symbol ? type.symbol.getJsDocTags() : undefined
-                            };
-                        }
-                }
-
-                return undefined;
+                const type = shouldGetType(sourceFile, node, position) ? typeChecker.getTypeAtLocation(node) : undefined;
+                return type && {
+                    kind: ScriptElementKind.unknown,
+                    kindModifiers: ScriptElementKindModifier.none,
+                    textSpan: createTextSpanFromNode(node, sourceFile),
+                    displayParts: typeChecker.runWithCancellationToken(cancellationToken, typeChecker => typeToDisplayParts(typeChecker, type, getContainerNode(node))),
+                    documentation: type.symbol ? type.symbol.getDocumentationComment(typeChecker) : undefined,
+                    tags: type.symbol ? type.symbol.getJsDocTags() : undefined
+                };
             }
 
-            const displayPartsDocumentationsAndKind = SymbolDisplay.getSymbolDisplayPartsDocumentationAndSymbolKind(typeChecker, symbol, sourceFile, getContainerNode(node), node);
+            const { symbolKind, displayParts, documentation, tags } = typeChecker.runWithCancellationToken(cancellationToken, typeChecker =>
+                SymbolDisplay.getSymbolDisplayPartsDocumentationAndSymbolKind(typeChecker, symbol, sourceFile, getContainerNode(node), node)
+            );
             return {
-                kind: displayPartsDocumentationsAndKind.symbolKind,
+                kind: symbolKind,
                 kindModifiers: SymbolDisplay.getSymbolModifiers(symbol),
-                textSpan: createTextSpan(node.getStart(), node.getWidth()),
-                displayParts: displayPartsDocumentationsAndKind.displayParts,
-                documentation: displayPartsDocumentationsAndKind.documentation,
-                tags: displayPartsDocumentationsAndKind.tags
+                textSpan: createTextSpanFromNode(node, sourceFile),
+                displayParts,
+                documentation,
+                tags,
             };
         }
 
+        function shouldGetType(sourceFile: SourceFile, node: Node, position: number): boolean {
+            switch (node.kind) {
+                case SyntaxKind.Identifier:
+                    return !isLabelName(node) && !isTagName(node);
+                case SyntaxKind.PropertyAccessExpression:
+                case SyntaxKind.QualifiedName:
+                    // Don't return quickInfo if inside the comment in `a/**/.b`
+                    return !isInComment(sourceFile, position);
+                case SyntaxKind.ThisKeyword:
+                case SyntaxKind.ThisType:
+                case SyntaxKind.SuperKeyword:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
         /// Goto definition
-        function getDefinitionAtPosition(fileName: string, position: number): DefinitionInfo[] {
+        function getDefinitionAtPosition(fileName: string, position: number): ReadonlyArray<DefinitionInfo> | undefined {
             synchronizeHostData();
             return GoToDefinition.getDefinitionAtPosition(program, getValidSourceFile(fileName), position);
         }
 
-        function getTypeDefinitionAtPosition(fileName: string, position: number): DefinitionInfo[] {
+        function getDefinitionAndBoundSpan(fileName: string, position: number): DefinitionInfoAndBoundSpan | undefined {
+            synchronizeHostData();
+            return GoToDefinition.getDefinitionAndBoundSpan(program, getValidSourceFile(fileName), position);
+        }
+
+        function getTypeDefinitionAtPosition(fileName: string, position: number): ReadonlyArray<DefinitionInfo> | undefined {
             synchronizeHostData();
             return GoToDefinition.getTypeDefinitionAtPosition(program.getTypeChecker(), getValidSourceFile(fileName), position);
         }
 
         /// Goto implementation
-        function getImplementationAtPosition(fileName: string, position: number): ImplementationLocation[] {
+
+        function getImplementationAtPosition(fileName: string, position: number): ImplementationLocation[] | undefined {
             synchronizeHostData();
             return FindAllReferences.getImplementationsAtPosition(program, cancellationToken, program.getSourceFiles(), getValidSourceFile(fileName), position);
         }
 
         /// References and Occurrences
-        function getOccurrencesAtPosition(fileName: string, position: number): ReferenceEntry[] {
-            let results = getOccurrencesAtPositionCore(fileName, position);
-
-            if (results) {
-                const sourceFile = getCanonicalFileName(normalizeSlashes(fileName));
-
-                // Get occurrences only supports reporting occurrences for the file queried.  So
-                // filter down to that list.
-                results = filter(results, r => getCanonicalFileName(ts.normalizeSlashes(r.fileName)) === sourceFile);
-            }
-
-            return results;
+        function getOccurrencesAtPosition(fileName: string, position: number): ReadonlyArray<ReferenceEntry> | undefined {
+            return flatMap(getDocumentHighlights(fileName, position, [fileName]), entry => entry.highlightSpans.map<ReferenceEntry>(highlightSpan => ({
+                fileName: entry.fileName,
+                textSpan: highlightSpan.textSpan,
+                isWriteAccess: highlightSpan.kind === HighlightSpanKind.writtenReference,
+                isDefinition: false,
+                isInString: highlightSpan.isInString,
+            })));
         }
 
-        function getDocumentHighlights(fileName: string, position: number, filesToSearch: string[]): DocumentHighlights[] {
+        function getDocumentHighlights(fileName: string, position: number, filesToSearch: ReadonlyArray<string>): DocumentHighlights[] | undefined {
+            const normalizedFileName = normalizePath(fileName);
+            Debug.assert(filesToSearch.some(f => normalizePath(f) === normalizedFileName));
             synchronizeHostData();
-            const sourceFilesToSearch = map(filesToSearch, f => program.getSourceFile(f));
+            const sourceFilesToSearch = filesToSearch.map(getValidSourceFile);
             const sourceFile = getValidSourceFile(fileName);
             return DocumentHighlights.getDocumentHighlights(program, cancellationToken, sourceFile, position, sourceFilesToSearch);
         }
 
-        function getOccurrencesAtPositionCore(fileName: string, position: number): ReferenceEntry[] {
-            return convertDocumentHighlights(getDocumentHighlights(fileName, position, [fileName]));
-
-            function convertDocumentHighlights(documentHighlights: DocumentHighlights[]): ReferenceEntry[] {
-                if (!documentHighlights) {
-                    return undefined;
-                }
-
-                const result: ReferenceEntry[] = [];
-                for (const entry of documentHighlights) {
-                    for (const highlightSpan of entry.highlightSpans) {
-                        result.push({
-                            fileName: entry.fileName,
-                            textSpan: highlightSpan.textSpan,
-                            isWriteAccess: highlightSpan.kind === HighlightSpanKind.writtenReference,
-                            isDefinition: false,
-                            isInString: highlightSpan.isInString,
-                        });
-                    }
-                }
-
-                return result;
+        function findRenameLocations(fileName: string, position: number, findInStrings: boolean, findInComments: boolean, providePrefixAndSuffixTextForRename?: boolean): RenameLocation[] | undefined {
+            synchronizeHostData();
+            const sourceFile = getValidSourceFile(fileName);
+            const node = getTouchingPropertyName(sourceFile, position);
+            if (isIdentifier(node) && (isJsxOpeningElement(node.parent) || isJsxClosingElement(node.parent)) && isIntrinsicJsxName(node.escapedText)) {
+                const { openingElement, closingElement } = node.parent.parent;
+                return [openingElement, closingElement].map((node): RenameLocation =>
+                    ({ fileName: sourceFile.fileName, textSpan: createTextSpanFromNode(node.tagName, sourceFile) }));
+            }
+            else {
+                return getReferencesWorker(node, position, { findInStrings, findInComments, providePrefixAndSuffixTextForRename, isForRename: true },
+                    (entry, originalNode, checker) => FindAllReferences.toRenameLocation(entry, originalNode, checker, providePrefixAndSuffixTextForRename || false));
             }
         }
 
-        function findRenameLocations(fileName: string, position: number, findInStrings: boolean, findInComments: boolean): RenameLocation[] {
-            return getReferences(fileName, position, { findInStrings, findInComments, isForRename: true });
-        }
-
-        function getReferencesAtPosition(fileName: string, position: number): ReferenceEntry[] {
-            return getReferences(fileName, position);
-        }
-
-        function getReferences(fileName: string, position: number, options?: FindAllReferences.Options) {
+        function getReferencesAtPosition(fileName: string, position: number): ReferenceEntry[] | undefined {
             synchronizeHostData();
-            return FindAllReferences.findReferencedEntries(program, cancellationToken, program.getSourceFiles(), getValidSourceFile(fileName), position, options);
+            return getReferencesWorker(getTouchingPropertyName(getValidSourceFile(fileName), position), position, {}, FindAllReferences.toReferenceEntry);
         }
 
-        function findReferences(fileName: string, position: number): ReferencedSymbol[] {
+        function getReferencesWorker<T>(node: Node, position: number, options: FindAllReferences.Options, cb: FindAllReferences.ToReferenceOrRenameEntry<T>): T[] | undefined {
+            synchronizeHostData();
+
+            // Exclude default library when renaming as commonly user don't want to change that file.
+            const sourceFiles = options && options.isForRename
+                ? program.getSourceFiles().filter(sourceFile => !program.isSourceFileDefaultLibrary(sourceFile))
+                : program.getSourceFiles();
+
+            return FindAllReferences.findReferenceOrRenameEntries(program, cancellationToken, sourceFiles, node, position, options, cb);
+        }
+
+        function findReferences(fileName: string, position: number): ReferencedSymbol[] | undefined {
             synchronizeHostData();
             return FindAllReferences.findReferencedSymbols(program, cancellationToken, program.getSourceFiles(), getValidSourceFile(fileName), position);
         }
 
-        /// NavigateTo
-        function getNavigateToItems(searchValue: string, maxResultCount?: number, fileName?: string, excludeDtsFiles?: boolean): NavigateToItem[] {
+        function getNavigateToItems(searchValue: string, maxResultCount?: number, fileName?: string, excludeDtsFiles = false): NavigateToItem[] {
             synchronizeHostData();
-
             const sourceFiles = fileName ? [getValidSourceFile(fileName)] : program.getSourceFiles();
-            return ts.NavigateTo.getNavigateToItems(sourceFiles, program.getTypeChecker(), cancellationToken, searchValue, maxResultCount, excludeDtsFiles);
+            return NavigateTo.getNavigateToItems(sourceFiles, program.getTypeChecker(), cancellationToken, searchValue, maxResultCount, excludeDtsFiles);
         }
 
-        function getEmitOutput(fileName: string, emitOnlyDtsFiles?: boolean): EmitOutput {
+        function getEmitOutput(fileName: string, emitOnlyDtsFiles = false) {
             synchronizeHostData();
 
             const sourceFile = getValidSourceFile(fileName);
-            const outputFiles: OutputFile[] = [];
-
-            function writeFile(fileName: string, text: string, writeByteOrderMark: boolean) {
-                outputFiles.push({ name: fileName, writeByteOrderMark, text });
-            }
-
             const customTransformers = host.getCustomTransformers && host.getCustomTransformers();
-            const emitOutput = program.emit(sourceFile, writeFile, cancellationToken, emitOnlyDtsFiles, customTransformers);
-
-            return {
-                outputFiles,
-                emitSkipped: emitOutput.emitSkipped
-            };
+            return getFileEmitOutput(program, sourceFile, emitOnlyDtsFiles, cancellationToken, customTransformers);
         }
 
         // Signature help
         /**
          * This is a semantic operation.
          */
-        function getSignatureHelpItems(fileName: string, position: number): SignatureHelpItems {
+        function getSignatureHelpItems(fileName: string, position: number, { triggerReason }: SignatureHelpItemsOptions = emptyOptions): SignatureHelpItems | undefined {
             synchronizeHostData();
 
             const sourceFile = getValidSourceFile(fileName);
 
-            return SignatureHelp.getSignatureHelpItems(program, sourceFile, position, cancellationToken);
+            return SignatureHelp.getSignatureHelpItems(program, sourceFile, position, triggerReason, cancellationToken);
         }
 
         /// Syntactic features
@@ -1562,18 +1621,14 @@ namespace ts {
             return syntaxTreeCache.getCurrentSourceFile(fileName);
         }
 
-        function getSourceFile(fileName: string): SourceFile {
-            return getNonBoundSourceFile(fileName);
-        }
-
-        function getNameOrDottedNameSpan(fileName: string, startPos: number, _endPos: number): TextSpan {
+        function getNameOrDottedNameSpan(fileName: string, startPos: number, _endPos: number): TextSpan | undefined {
             const sourceFile = syntaxTreeCache.getCurrentSourceFile(fileName);
 
             // Get node at the location
-            const node = getTouchingPropertyName(sourceFile, startPos, /*includeJsDocComment*/ false);
+            const node = getTouchingPropertyName(sourceFile, startPos);
 
             if (node === sourceFile) {
-                return;
+                return undefined;
             }
 
             switch (node.kind) {
@@ -1591,7 +1646,7 @@ namespace ts {
 
                 // Cant create the text span
                 default:
-                    return;
+                    return undefined;
             }
 
             let nodeForStartPos = node;
@@ -1623,7 +1678,7 @@ namespace ts {
             return createTextSpanFromBounds(nodeForStartPos.getStart(), node.getEnd());
         }
 
-        function getBreakpointStatementAtPosition(fileName: string, position: number) {
+        function getBreakpointStatementAtPosition(fileName: string, position: number): TextSpan | undefined {
             // doesn't use compiler - no need to synchronize with host
             const sourceFile = syntaxTreeCache.getCurrentSourceFile(fileName);
 
@@ -1677,55 +1732,21 @@ namespace ts {
             return OutliningElementsCollector.collectElements(sourceFile, cancellationToken);
         }
 
-        function getBraceMatchingAtPosition(fileName: string, position: number) {
+        const braceMatching = createMapFromTemplate({
+            [SyntaxKind.OpenBraceToken]: SyntaxKind.CloseBraceToken,
+            [SyntaxKind.OpenParenToken]: SyntaxKind.CloseParenToken,
+            [SyntaxKind.OpenBracketToken]: SyntaxKind.CloseBracketToken,
+            [SyntaxKind.GreaterThanToken]: SyntaxKind.LessThanToken,
+        });
+        braceMatching.forEach((value, key) => braceMatching.set(value.toString(), Number(key) as SyntaxKind));
+
+        function getBraceMatchingAtPosition(fileName: string, position: number): TextSpan[] {
             const sourceFile = syntaxTreeCache.getCurrentSourceFile(fileName);
-            const result: TextSpan[] = [];
-
-            const token = getTouchingToken(sourceFile, position, /*includeJsDocComment*/ false);
-
-            if (token.getStart(sourceFile) === position) {
-                const matchKind = getMatchingTokenKind(token);
-
-                // Ensure that there is a corresponding token to match ours.
-                if (matchKind) {
-                    const parentElement = token.parent;
-
-                    const childNodes = parentElement.getChildren(sourceFile);
-                    for (const current of childNodes) {
-                        if (current.kind === matchKind) {
-                            const range1 = createTextSpan(token.getStart(sourceFile), token.getWidth(sourceFile));
-                            const range2 = createTextSpan(current.getStart(sourceFile), current.getWidth(sourceFile));
-
-                            // We want to order the braces when we return the result.
-                            if (range1.start < range2.start) {
-                                result.push(range1, range2);
-                            }
-                            else {
-                                result.push(range2, range1);
-                            }
-
-                            break;
-                        }
-                    }
-                }
-            }
-
-            return result;
-
-            function getMatchingTokenKind(token: Node): ts.SyntaxKind {
-                switch (token.kind) {
-                    case ts.SyntaxKind.OpenBraceToken: return ts.SyntaxKind.CloseBraceToken;
-                    case ts.SyntaxKind.OpenParenToken: return ts.SyntaxKind.CloseParenToken;
-                    case ts.SyntaxKind.OpenBracketToken: return ts.SyntaxKind.CloseBracketToken;
-                    case ts.SyntaxKind.LessThanToken: return ts.SyntaxKind.GreaterThanToken;
-                    case ts.SyntaxKind.CloseBraceToken: return ts.SyntaxKind.OpenBraceToken;
-                    case ts.SyntaxKind.CloseParenToken: return ts.SyntaxKind.OpenParenToken;
-                    case ts.SyntaxKind.CloseBracketToken: return ts.SyntaxKind.OpenBracketToken;
-                    case ts.SyntaxKind.GreaterThanToken: return ts.SyntaxKind.LessThanToken;
-                }
-
-                return undefined;
-            }
+            const token = getTouchingToken(sourceFile, position);
+            const matchKind = token.getStart(sourceFile) === position ? braceMatching.get(token.kind.toString()) : undefined;
+            const match = matchKind && findChildOfKind(token.parent, matchKind, sourceFile);
+            // We want to order the braces when we return the result.
+            return match ? [createTextSpanFromNode(token, sourceFile), createTextSpanFromNode(match, sourceFile)].sort((a, b) => a.start - b.start) : emptyArray;
         }
 
         function getIndentationAtPosition(fileName: string, position: number, editorOptions: EditorOptions | EditorSettings) {
@@ -1744,49 +1765,101 @@ namespace ts {
 
         function getFormattingEditsForRange(fileName: string, start: number, end: number, options: FormatCodeOptions | FormatCodeSettings): TextChange[] {
             const sourceFile = syntaxTreeCache.getCurrentSourceFile(fileName);
-            const settings = toEditorSettings(options);
-            return formatting.formatSelection(start, end, sourceFile, getRuleProvider(settings), settings);
+            return formatting.formatSelection(start, end, sourceFile, formatting.getFormatContext(toEditorSettings(options)));
         }
 
         function getFormattingEditsForDocument(fileName: string, options: FormatCodeOptions | FormatCodeSettings): TextChange[] {
-            const sourceFile = syntaxTreeCache.getCurrentSourceFile(fileName);
-            const settings = toEditorSettings(options);
-            return formatting.formatDocument(sourceFile, getRuleProvider(settings), settings);
+            return formatting.formatDocument(syntaxTreeCache.getCurrentSourceFile(fileName), formatting.getFormatContext(toEditorSettings(options)));
         }
 
         function getFormattingEditsAfterKeystroke(fileName: string, position: number, key: string, options: FormatCodeOptions | FormatCodeSettings): TextChange[] {
             const sourceFile = syntaxTreeCache.getCurrentSourceFile(fileName);
-            const settings = toEditorSettings(options);
-            if (key === "{") {
-                return formatting.formatOnOpeningCurly(position, sourceFile, getRuleProvider(settings), settings);
-            }
-            else if (key === "}") {
-                return formatting.formatOnClosingCurly(position, sourceFile, getRuleProvider(settings), settings);
-            }
-            else if (key === ";") {
-                return formatting.formatOnSemicolon(position, sourceFile, getRuleProvider(settings), settings);
-            }
-            else if (key === "\n") {
-                return formatting.formatOnEnter(position, sourceFile, getRuleProvider(settings), settings);
+            const formatContext = formatting.getFormatContext(toEditorSettings(options));
+
+            if (!isInComment(sourceFile, position)) {
+                switch (key) {
+                    case "{":
+                        return formatting.formatOnOpeningCurly(position, sourceFile, formatContext);
+                    case "}":
+                        return formatting.formatOnClosingCurly(position, sourceFile, formatContext);
+                    case ";":
+                        return formatting.formatOnSemicolon(position, sourceFile, formatContext);
+                    case "\n":
+                        return formatting.formatOnEnter(position, sourceFile, formatContext);
+                }
             }
 
             return [];
         }
 
-        function getCodeFixesAtPosition(fileName: string, start: number, end: number, errorCodes: number[], formatOptions: FormatCodeSettings): CodeAction[] {
+        function getCodeFixesAtPosition(fileName: string, start: number, end: number, errorCodes: ReadonlyArray<number>, formatOptions: FormatCodeSettings, preferences: UserPreferences = emptyOptions): ReadonlyArray<CodeFixAction> {
             synchronizeHostData();
             const sourceFile = getValidSourceFile(fileName);
             const span = createTextSpanFromBounds(start, end);
-            const newLineCharacter = getNewLineOrDefaultFromHost(host);
-            const rulesProvider = getRuleProvider(formatOptions);
+            const formatContext = formatting.getFormatContext(formatOptions);
 
-            return flatMap(deduplicate(errorCodes), errorCode => {
+            return flatMap(deduplicate<number>(errorCodes, equateValues, compareValues), errorCode => {
                 cancellationToken.throwIfCancellationRequested();
-                return codefix.getFixes({ errorCode, sourceFile, span, program, newLineCharacter, host, cancellationToken, rulesProvider });
+                return codefix.getFixes({ errorCode, sourceFile, span, program, host, cancellationToken, formatContext, preferences });
             });
         }
 
-        function getDocCommentTemplateAtPosition(fileName: string, position: number): TextInsertion {
+        function getCombinedCodeFix(scope: CombinedCodeFixScope, fixId: {}, formatOptions: FormatCodeSettings, preferences: UserPreferences = emptyOptions): CombinedCodeActions {
+            synchronizeHostData();
+            Debug.assert(scope.type === "file");
+            const sourceFile = getValidSourceFile(scope.fileName);
+            const formatContext = formatting.getFormatContext(formatOptions);
+
+            return codefix.getAllFixes({ fixId, sourceFile, program, host, cancellationToken, formatContext, preferences });
+        }
+
+        function organizeImports(scope: OrganizeImportsScope, formatOptions: FormatCodeSettings, preferences: UserPreferences = emptyOptions): ReadonlyArray<FileTextChanges> {
+            synchronizeHostData();
+            Debug.assert(scope.type === "file");
+            const sourceFile = getValidSourceFile(scope.fileName);
+            const formatContext = formatting.getFormatContext(formatOptions);
+
+            return OrganizeImports.organizeImports(sourceFile, formatContext, host, program, preferences);
+        }
+
+        function getEditsForFileRename(oldFilePath: string, newFilePath: string, formatOptions: FormatCodeSettings, preferences: UserPreferences = emptyOptions): ReadonlyArray<FileTextChanges> {
+            return ts.getEditsForFileRename(getProgram()!, oldFilePath, newFilePath, host, formatting.getFormatContext(formatOptions), preferences, sourceMapper);
+        }
+
+        function applyCodeActionCommand(action: CodeActionCommand, formatSettings?: FormatCodeSettings): Promise<ApplyCodeActionCommandResult>;
+        function applyCodeActionCommand(action: CodeActionCommand[], formatSettings?: FormatCodeSettings): Promise<ApplyCodeActionCommandResult[]>;
+        function applyCodeActionCommand(action: CodeActionCommand | CodeActionCommand[], formatSettings?: FormatCodeSettings): Promise<ApplyCodeActionCommandResult | ApplyCodeActionCommandResult[]>;
+        function applyCodeActionCommand(fileName: Path, action: CodeActionCommand): Promise<ApplyCodeActionCommandResult>;
+        function applyCodeActionCommand(fileName: Path, action: CodeActionCommand[]): Promise<ApplyCodeActionCommandResult[]>;
+        function applyCodeActionCommand(fileName: Path | CodeActionCommand | CodeActionCommand[], actionOrFormatSettingsOrUndefined?: CodeActionCommand | CodeActionCommand[] | FormatCodeSettings): Promise<ApplyCodeActionCommandResult | ApplyCodeActionCommandResult[]> {
+            const action = typeof fileName === "string" ? actionOrFormatSettingsOrUndefined as CodeActionCommand | CodeActionCommand[] : fileName as CodeActionCommand[];
+            const formatSettings = typeof fileName !== "string" ? actionOrFormatSettingsOrUndefined as FormatCodeSettings : undefined;
+            return isArray(action) ? Promise.all(action.map(a => applySingleCodeActionCommand(a, formatSettings))) : applySingleCodeActionCommand(action, formatSettings);
+        }
+
+        function applySingleCodeActionCommand(action: CodeActionCommand, formatSettings: FormatCodeSettings | undefined): Promise<ApplyCodeActionCommandResult> {
+            const getPath = (path: string): Path => toPath(path, currentDirectory, getCanonicalFileName);
+            switch (action.type) {
+                case "install package":
+                    return host.installPackage
+                        ? host.installPackage({ fileName: getPath(action.file), packageName: action.packageName })
+                        : Promise.reject("Host does not implement `installPackage`");
+                case "generate types": {
+                    const { fileToGenerateTypesFor, outputFileName } = action;
+                    if (!host.inspectValue) return Promise.reject("Host does not implement `installPackage`");
+                    const valueInfoPromise = host.inspectValue({ fileNameToRequire: fileToGenerateTypesFor });
+                    return valueInfoPromise.then(valueInfo => {
+                        const fullOut = getPath(outputFileName);
+                        host.writeFile!(fullOut, valueInfoToDeclarationFileText(valueInfo, formatSettings || testFormatSettings)); // TODO: GH#18217
+                        return { successMessage: `Wrote types to '${fullOut}'` };
+                    });
+                }
+                default:
+                    return Debug.assertNever(action);
+            }
+        }
+
+        function getDocCommentTemplateAtPosition(fileName: string, position: number): TextInsertion | undefined {
             return JsDoc.getDocCommentTemplateAtPosition(getNewLineOrDefaultFromHost(host), syntaxTreeCache.getCurrentSourceFile(fileName), position);
         }
 
@@ -1826,6 +1899,28 @@ namespace ts {
             return true;
         }
 
+        function getJsxClosingTagAtPosition(fileName: string, position: number): JsxClosingTagInfo | undefined {
+            const sourceFile = syntaxTreeCache.getCurrentSourceFile(fileName);
+            const token = findPrecedingToken(position, sourceFile);
+            if (!token) return undefined;
+            const element = token.kind === SyntaxKind.GreaterThanToken && isJsxOpeningElement(token.parent) ? token.parent.parent
+                : isJsxText(token) ? token.parent : undefined;
+            if (element && isUnclosedTag(element)) {
+                return { newText: `</${element.openingElement.tagName.getText(sourceFile)}>` };
+            }
+        }
+
+        function isUnclosedTag({ openingElement, closingElement, parent }: JsxElement): boolean {
+            return !tagNamesAreEquivalent(openingElement.tagName, closingElement.tagName) ||
+                isJsxElement(parent) && tagNamesAreEquivalent(openingElement.tagName, parent.openingElement.tagName) && isUnclosedTag(parent);
+        }
+
+        function getSpanOfEnclosingComment(fileName: string, position: number, onlyMultiLine: boolean): TextSpan | undefined {
+            const sourceFile = syntaxTreeCache.getCurrentSourceFile(fileName);
+            const range = formatting.getRangeOfEnclosingComment(sourceFile, position);
+            return range && (!onlyMultiLine || range.kind === SyntaxKind.MultiLineCommentTrivia) ? createTextSpanFromRange(range) : undefined;
+        }
+
         function getTodoComments(fileName: string, descriptors: TodoCommentDescriptor[]): TodoComment[] {
             // Note: while getting todo comments seems like a syntactic operation, we actually
             // treat it as a semantic operation here.  This is because we expect our host to call
@@ -1846,7 +1941,7 @@ namespace ts {
             if (descriptors.length > 0 && !isNodeModulesFile(sourceFile.fileName)) {
                 const regExp = getTodoCommentsRegExp();
 
-                let matchArray: RegExpExecArray;
+                let matchArray: RegExpExecArray | null;
                 while (matchArray = regExp.exec(fileContents)) {
                     cancellationToken.throwIfCancellationRequested();
 
@@ -1879,13 +1974,13 @@ namespace ts {
                         continue;
                     }
 
-                    let descriptor: TodoCommentDescriptor = undefined;
+                    let descriptor: TodoCommentDescriptor | undefined;
                     for (let i = 0; i < descriptors.length; i++) {
                         if (matchArray[i + firstDescriptorCaptureIndex]) {
                             descriptor = descriptors[i];
                         }
                     }
-                    Debug.assert(descriptor !== undefined);
+                    if (descriptor === undefined) return Debug.fail();
 
                     // We don't want to match something like 'TODOBY', so we make sure a non
                     // letter/digit follows the match.
@@ -1905,7 +2000,7 @@ namespace ts {
             }
 
             function getTodoCommentsRegExp(): RegExp {
-                // NOTE: ?:  means 'non-capture group'.  It allows us to have groups without having to
+                // NOTE: `?:` means 'non-capture group'.  It allows us to have groups without having to
                 // filter them out later in the final result array.
 
                 // TODO comments can appear in one of the following forms:
@@ -1969,35 +2064,33 @@ namespace ts {
             }
 
             function isNodeModulesFile(path: string): boolean {
-                const node_modulesFolderName = "/node_modules/";
-
-                return path.indexOf(node_modulesFolderName) !== -1;
+                return stringContains(path, "/node_modules/");
             }
         }
 
-        function getRenameInfo(fileName: string, position: number): RenameInfo {
+        function getRenameInfo(fileName: string, position: number, options?: RenameInfoOptions): RenameInfo {
             synchronizeHostData();
-            const defaultLibFileName = host.getDefaultLibFileName(host.getCompilationSettings());
-            return Rename.getRenameInfo(program.getTypeChecker(), defaultLibFileName, getCanonicalFileName, getValidSourceFile(fileName), position);
+            return Rename.getRenameInfo(program, getValidSourceFile(fileName), position, options);
         }
 
-        function getRefactorContext(file: SourceFile, positionOrRange: number | TextRange, formatOptions?: FormatCodeSettings): RefactorContext {
+        function getRefactorContext(file: SourceFile, positionOrRange: number | TextRange, preferences: UserPreferences, formatOptions?: FormatCodeSettings): RefactorContext {
             const [startPosition, endPosition] = typeof positionOrRange === "number" ? [positionOrRange, undefined] : [positionOrRange.pos, positionOrRange.end];
             return {
                 file,
                 startPosition,
                 endPosition,
-                program: getProgram(),
-                newLineCharacter: host.getNewLine(),
-                rulesProvider: getRuleProvider(formatOptions),
-                cancellationToken
+                program: getProgram()!,
+                host,
+                formatContext: formatting.getFormatContext(formatOptions!), // TODO: GH#18217
+                cancellationToken,
+                preferences,
             };
         }
 
-        function getApplicableRefactors(fileName: string, positionOrRange: number | TextRange): ApplicableRefactorInfo[] {
+        function getApplicableRefactors(fileName: string, positionOrRange: number | TextRange, preferences: UserPreferences = emptyOptions): ApplicableRefactorInfo[] {
             synchronizeHostData();
             const file = getValidSourceFile(fileName);
-            return refactor.getApplicableRefactors(getRefactorContext(file, positionOrRange));
+            return refactor.getApplicableRefactors(getRefactorContext(file, positionOrRange, preferences));
         }
 
         function getEditsForRefactor(
@@ -2005,11 +2098,12 @@ namespace ts {
             formatOptions: FormatCodeSettings,
             positionOrRange: number | TextRange,
             refactorName: string,
-            actionName: string): RefactorEditInfo {
-
+            actionName: string,
+            preferences: UserPreferences = emptyOptions,
+        ): RefactorEditInfo | undefined {
             synchronizeHostData();
             const file = getValidSourceFile(fileName);
-            return refactor.getEditsForRefactor(getRefactorContext(file, positionOrRange, formatOptions), refactorName, actionName);
+            return refactor.getEditsForRefactor(getRefactorContext(file, positionOrRange, preferences, formatOptions), refactorName, actionName);
         }
 
         return {
@@ -2017,6 +2111,7 @@ namespace ts {
             cleanupSemanticCache,
             getSyntacticDiagnostics,
             getSemanticDiagnostics,
+            getSuggestionDiagnostics,
             getCompilerOptionsDiagnostics,
             getSyntacticClassifications,
             getSemanticClassifications,
@@ -2028,6 +2123,7 @@ namespace ts {
             getSignatureHelpItems,
             getQuickInfoAtPosition,
             getDefinitionAtPosition,
+            getDefinitionAndBoundSpan,
             getImplementationAtPosition,
             getTypeDefinitionAtPosition,
             getReferencesAtPosition,
@@ -2050,13 +2146,20 @@ namespace ts {
             getFormattingEditsAfterKeystroke,
             getDocCommentTemplateAtPosition,
             isValidBraceCompletionAtPosition,
+            getJsxClosingTagAtPosition,
+            getSpanOfEnclosingComment,
             getCodeFixesAtPosition,
+            getCombinedCodeFix,
+            applyCodeActionCommand,
+            organizeImports,
+            getEditsForFileRename,
             getEmitOutput,
             getNonBoundSourceFile,
-            getSourceFile,
             getProgram,
             getApplicableRefactors,
             getEditsForRefactor,
+            toLineColumnOffset: sourceMapper.toLineColumnOffset,
+            getSourceMapper: () => sourceMapper,
         };
     }
 
@@ -2067,20 +2170,20 @@ namespace ts {
             initializeNameTable(sourceFile);
         }
 
-        return sourceFile.nameTable;
+        return sourceFile.nameTable!; // TODO: GH#18217
     }
 
     function initializeNameTable(sourceFile: SourceFile): void {
         const nameTable = sourceFile.nameTable = createUnderscoreEscapedMap<number>();
         sourceFile.forEachChild(function walk(node) {
-            if (isIdentifier(node) && node.escapedText || isStringOrNumericLiteral(node) && literalIsName(node)) {
+            if (isIdentifier(node) && !isTagName(node) && node.escapedText || isStringOrNumericLiteralLike(node) && literalIsName(node)) {
                 const text = getEscapedTextOfIdentifierOrLiteral(node);
                 nameTable.set(text, nameTable.get(text) === undefined ? node.pos : -1);
             }
 
             forEachChild(node, walk);
-            if (node.jsDoc) {
-                for (const jsDoc of node.jsDoc) {
+            if (hasJSDocNodes(node)) {
+                for (const jsDoc of node.jsDoc!) {
                     forEachChild(jsDoc, walk);
                 }
             }
@@ -2093,71 +2196,72 @@ namespace ts {
      * then we want 'something' to be in the name table.  Similarly, if we have
      * "a['propname']" then we want to store "propname" in the name table.
      */
-    function literalIsName(node: ts.StringLiteral | ts.NumericLiteral): boolean {
+    function literalIsName(node: StringLiteralLike | NumericLiteral): boolean {
         return isDeclarationName(node) ||
             node.parent.kind === SyntaxKind.ExternalModuleReference ||
             isArgumentOfElementAccessExpression(node) ||
             isLiteralComputedPropertyDeclarationName(node);
     }
 
-    function isObjectLiteralElement(node: Node): node is ObjectLiteralElement  {
-        switch (node.kind) {
-            case SyntaxKind.JsxAttribute:
-            case SyntaxKind.JsxSpreadAttribute:
-            case SyntaxKind.PropertyAssignment:
-            case SyntaxKind.ShorthandPropertyAssignment:
-            case SyntaxKind.MethodDeclaration:
-            case SyntaxKind.GetAccessor:
-            case SyntaxKind.SetAccessor:
-                return true;
-        }
-        return false;
-    }
-
     /**
      * Returns the containing object literal property declaration given a possible name node, e.g. "a" in x = { "a": 1 }
      */
     /* @internal */
-    export function getContainingObjectLiteralElement(node: Node): ObjectLiteralElement {
+    export function getContainingObjectLiteralElement(node: Node): ObjectLiteralElementWithName | undefined {
+        const element = getContainingObjectLiteralElementWorker(node);
+        return element && (isObjectLiteralExpression(element.parent) || isJsxAttributes(element.parent)) ? element as ObjectLiteralElementWithName : undefined;
+    }
+    function getContainingObjectLiteralElementWorker(node: Node): ObjectLiteralElement | undefined {
         switch (node.kind) {
             case SyntaxKind.StringLiteral:
             case SyntaxKind.NumericLiteral:
                 if (node.parent.kind === SyntaxKind.ComputedPropertyName) {
                     return isObjectLiteralElement(node.parent.parent) ? node.parent.parent : undefined;
                 }
-                // falls through
+            // falls through
             case SyntaxKind.Identifier:
                 return isObjectLiteralElement(node.parent) &&
                     (node.parent.parent.kind === SyntaxKind.ObjectLiteralExpression || node.parent.parent.kind === SyntaxKind.JsxAttributes) &&
-                    (<ObjectLiteralElement>node.parent).name === node ? node.parent as ObjectLiteralElement : undefined;
+                    node.parent.name === node ? node.parent : undefined;
         }
         return undefined;
     }
 
     /* @internal */
-    export function getPropertySymbolsFromContextualType(typeChecker: TypeChecker, node: ObjectLiteralElement): Symbol[] {
-        const objectLiteral = <ObjectLiteralExpression | JsxAttributes>node.parent;
-        const contextualType = typeChecker.getContextualType(objectLiteral);
-        const name = unescapeLeadingUnderscores(getTextOfPropertyName(node.name));
-        if (name && contextualType) {
-            const result: Symbol[] = [];
-            const symbol = contextualType.getProperty(name);
-            if (contextualType.flags & TypeFlags.Union) {
-                forEach((<UnionType>contextualType).types, t => {
-                    const symbol = t.getProperty(name);
-                    if (symbol) {
-                        result.push(symbol);
-                    }
-                });
-                return result;
-            }
+    export type ObjectLiteralElementWithName = ObjectLiteralElement & { name: PropertyName; parent: ObjectLiteralExpression | JsxAttributes };
 
-            if (symbol) {
-                result.push(symbol);
-                return result;
+    function getSymbolAtLocationForQuickInfo(node: Node, checker: TypeChecker): Symbol | undefined {
+        const object = getContainingObjectLiteralElement(node);
+        if (object) {
+            const contextualType = checker.getContextualType(object.parent);
+            const properties = contextualType && getPropertySymbolsFromContextualType(object, checker, contextualType, /*unionSymbolOk*/ false);
+            if (properties && properties.length === 1) {
+                return first(properties);
             }
         }
-        return undefined;
+        return checker.getSymbolAtLocation(node);
+    }
+
+    /** Gets all symbols for one property. Does not get symbols for every property. */
+    /* @internal */
+    export function getPropertySymbolsFromContextualType(node: ObjectLiteralElementWithName, checker: TypeChecker, contextualType: Type, unionSymbolOk: boolean): ReadonlyArray<Symbol> {
+        const name = getNameFromPropertyName(node.name);
+        if (!name) return emptyArray;
+        if (!contextualType.isUnion()) {
+            const symbol = contextualType.getProperty(name);
+            return symbol ? [symbol] : emptyArray;
+        }
+
+        const discriminatedPropertySymbols = mapDefined(contextualType.types, t => isObjectLiteralExpression(node.parent) && checker.isTypeInvalidDueToUnionDiscriminant(t, node.parent) ? undefined : t.getProperty(name));
+        if (unionSymbolOk && (discriminatedPropertySymbols.length === 0 || discriminatedPropertySymbols.length === contextualType.types.length)) {
+            const symbol = contextualType.getProperty(name);
+            if (symbol) return [symbol];
+        }
+        if (discriminatedPropertySymbols.length === 0) {
+            // Bad discriminant -- do again without discriminating
+            return mapDefined(contextualType.types, t => t.getProperty(name));
+        }
+        return discriminatedPropertySymbols;
     }
 
     function isArgumentOfElementAccessExpression(node: Node) {

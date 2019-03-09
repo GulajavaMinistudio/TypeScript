@@ -28,9 +28,12 @@ module TypeScript2 {
 
 //// [genericRecursiveImplicitConstructorErrors2.js]
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
@@ -47,7 +50,7 @@ var TypeScript2;
         PullSymbolVisibility[PullSymbolVisibility["Private"] = 0] = "Private";
         PullSymbolVisibility[PullSymbolVisibility["Public"] = 1] = "Public";
     })(PullSymbolVisibility = TypeScript2.PullSymbolVisibility || (TypeScript2.PullSymbolVisibility = {}));
-    var PullSymbol = (function () {
+    var PullSymbol = /** @class */ (function () {
         function PullSymbol(name, declKind) {
         }
         // link methods
@@ -59,7 +62,7 @@ var TypeScript2;
         return PullSymbol;
     }());
     TypeScript2.PullSymbol = PullSymbol;
-    var PullTypeSymbol = (function (_super) {
+    var PullTypeSymbol = /** @class */ (function (_super) {
         __extends(PullTypeSymbol, _super);
         function PullTypeSymbol() {
             return _super !== null && _super.apply(this, arguments) || this;

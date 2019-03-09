@@ -82,9 +82,12 @@ for (var x in Color.Blue) { }
 
 //// [for-inStatements.js]
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
@@ -111,7 +114,7 @@ for (var x in 42 ? d[x] : c[x]) { }
 for (var x in c[d]) { }
 for (var x in (function (x) { return x; })) { }
 for (var x in function (x, y) { return x + y; }) { }
-var A = (function () {
+var A = /** @class */ (function () {
     function A() {
     }
     A.prototype.biz = function () {
@@ -128,7 +131,7 @@ var A = (function () {
     };
     return A;
 }());
-var B = (function (_super) {
+var B = /** @class */ (function (_super) {
     __extends(B, _super);
     function B() {
         return _super !== null && _super.apply(this, arguments) || this;
@@ -147,7 +150,7 @@ var i;
 for (var x in i[42]) { }
 var M;
 (function (M) {
-    var X = (function () {
+    var X = /** @class */ (function () {
         function X() {
         }
         return X;

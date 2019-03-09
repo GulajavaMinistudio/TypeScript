@@ -32,9 +32,12 @@ test.tags();
 //// [emitClassExpressionInDeclarationFile2.js]
 "use strict";
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
@@ -42,7 +45,8 @@ var __extends = (this && this.__extends) || (function () {
     };
 })();
 exports.__esModule = true;
-exports.noPrivates = (_a = (function () {
+var _a;
+exports.noPrivates = (_a = /** @class */ (function () {
         function class_1() {
             this.p = 12;
         }
@@ -53,7 +57,7 @@ exports.noPrivates = (_a = (function () {
     _a.ps = -1,
     _a);
 // altered repro from #15066 to add private property
-var FooItem = (function () {
+var FooItem = /** @class */ (function () {
     function FooItem() {
         this.property = "capitalism";
     }
@@ -62,7 +66,7 @@ var FooItem = (function () {
 }());
 exports.FooItem = FooItem;
 function WithTags(Base) {
-    return (function (_super) {
+    return /** @class */ (function (_super) {
         __extends(class_2, _super);
         function class_2() {
             return _super !== null && _super.apply(this, arguments) || this;
@@ -73,7 +77,7 @@ function WithTags(Base) {
     }(Base));
 }
 exports.WithTags = WithTags;
-var Test = (function (_super) {
+var Test = /** @class */ (function (_super) {
     __extends(Test, _super);
     function Test() {
         return _super !== null && _super.apply(this, arguments) || this;
@@ -84,4 +88,3 @@ exports.Test = Test;
 var test = new Test();
 Test.getTags();
 test.tags();
-var _a;

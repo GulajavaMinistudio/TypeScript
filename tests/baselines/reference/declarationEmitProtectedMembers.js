@@ -51,9 +51,12 @@ class C4 {
 
 //// [declarationEmitProtectedMembers.js]
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
@@ -61,7 +64,7 @@ var __extends = (this && this.__extends) || (function () {
     };
 })();
 // Class with protected members
-var C1 = (function () {
+var C1 = /** @class */ (function () {
     function C1() {
     }
     C1.prototype.f = function () {
@@ -89,7 +92,7 @@ var C1 = (function () {
     return C1;
 }());
 // Derived class overriding protected members
-var C2 = (function (_super) {
+var C2 = /** @class */ (function (_super) {
     __extends(C2, _super);
     function C2() {
         return _super !== null && _super.apply(this, arguments) || this;
@@ -103,7 +106,7 @@ var C2 = (function (_super) {
     return C2;
 }(C1));
 // Derived class making protected members public
-var C3 = (function (_super) {
+var C3 = /** @class */ (function (_super) {
     __extends(C3, _super);
     function C3() {
         return _super !== null && _super.apply(this, arguments) || this;
@@ -122,7 +125,7 @@ var C3 = (function (_super) {
     return C3;
 }(C2));
 // Protected properties in constructors
-var C4 = (function () {
+var C4 = /** @class */ (function () {
     function C4(a, b) {
         this.a = a;
         this.b = b;

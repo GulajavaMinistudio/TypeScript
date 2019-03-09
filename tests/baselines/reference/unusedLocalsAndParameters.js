@@ -81,7 +81,10 @@ namespace N {
     var x;
 }
 
-    
+for (let x: y) {
+    z(x);
+}
+
 
 //// [unusedLocalsAndParameters.js]
 "use strict";
@@ -97,7 +100,7 @@ fexp(0);
 // arrow function paramter
 var farrow = function (a) {
 };
-var C = (function () {
+var C = /** @class */ (function () {
     function C() {
     }
     // Method declaration paramter
@@ -112,7 +115,7 @@ var C = (function () {
     });
     return C;
 }());
-var E = (function () {
+var E = /** @class */ (function () {
     function class_1() {
     }
     // Method declaration paramter
@@ -166,3 +169,5 @@ var N;
 (function (N) {
     var x;
 })(N || (N = {}));
+for (var x = void 0, z = (void 0).z; (x); )
+    ;

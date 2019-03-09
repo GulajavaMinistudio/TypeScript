@@ -13,33 +13,36 @@ class Scoobyd extends Dood {}
 //// [outFile.js]
 #!/usr/bin/env gjs
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
         d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
     };
 })();
-var Doo = (function () {
+var Doo = /** @class */ (function () {
     function Doo() {
     }
     return Doo;
 }());
-var Scooby = (function (_super) {
+var Scooby = /** @class */ (function (_super) {
     __extends(Scooby, _super);
     function Scooby() {
         return _super !== null && _super.apply(this, arguments) || this;
     }
     return Scooby;
 }(Doo));
-var Dood = (function () {
+var Dood = /** @class */ (function () {
     function Dood() {
     }
     return Dood;
 }());
-var Scoobyd = (function (_super) {
+var Scoobyd = /** @class */ (function (_super) {
     __extends(Scoobyd, _super);
     function Scoobyd() {
         return _super !== null && _super.apply(this, arguments) || this;

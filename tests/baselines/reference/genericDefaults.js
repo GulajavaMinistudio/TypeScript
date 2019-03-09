@@ -489,6 +489,9 @@ const t03c02 = (<t03<number, number>>x).a;
 const t03c03 = (<t03<1, 1>>x).a;
 const t03c04 = (<t03<number, 1>>x).a;
 
+// https://github.com/Microsoft/TypeScript/issues/16221
+interface SelfReference<T = SelfReference<string>> {}
+
 //// [genericDefaults.js]
 // no inference
 f00();
@@ -946,12 +949,12 @@ interface i04<T = number, U = string> {
 interface i05<T = T> {
     a: T;
 }
-declare const i05c00: {};
+declare const i05c00: any;
 declare const i05c01: number;
 interface i06<T = U, U = T> {
     a: [T, U];
 }
-declare const i06c00: [{}, {}];
+declare const i06c00: [any, any];
 declare const i06c01: [number, number];
 declare const i06c02: [number, string];
 interface i07 {
@@ -1024,3 +1027,5 @@ declare const t03c01: [1, 1];
 declare const t03c02: [number, number];
 declare const t03c03: [1, 1];
 declare const t03c04: [number, 1];
+interface SelfReference<T = SelfReference<string>> {
+}

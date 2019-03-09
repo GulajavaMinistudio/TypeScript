@@ -39,7 +39,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
-var A = (function () {
+var A = /** @class */ (function () {
     function A() {
     }
     Object.defineProperty(A.prototype, "x", {
@@ -50,12 +50,12 @@ var A = (function () {
     });
     __decorate([
         dec,
-        __metadata("design:type", Object),
+        __metadata("design:type", Number),
         __metadata("design:paramtypes", [Number])
     ], A.prototype, "x", null);
     return A;
 }());
-var B = (function () {
+var B = /** @class */ (function () {
     function B() {
     }
     Object.defineProperty(B.prototype, "x", {
@@ -71,7 +71,7 @@ var B = (function () {
     ], B.prototype, "x", null);
     return B;
 }());
-var C = (function () {
+var C = /** @class */ (function () {
     function C() {
     }
     Object.defineProperty(C.prototype, "x", {
@@ -87,7 +87,7 @@ var C = (function () {
     ], C.prototype, "x", null);
     return C;
 }());
-var D = (function () {
+var D = /** @class */ (function () {
     function D() {
     }
     Object.defineProperty(D.prototype, "x", {
@@ -98,12 +98,12 @@ var D = (function () {
     });
     __decorate([
         dec,
-        __metadata("design:type", Object),
+        __metadata("design:type", Number),
         __metadata("design:paramtypes", [Number])
     ], D.prototype, "x", null);
     return D;
 }());
-var E = (function () {
+var E = /** @class */ (function () {
     function E() {
     }
     Object.defineProperty(E.prototype, "x", {
@@ -118,7 +118,7 @@ var E = (function () {
     ], E.prototype, "x", null);
     return E;
 }());
-var F = (function () {
+var F = /** @class */ (function () {
     function F() {
     }
     Object.defineProperty(F.prototype, "x", {

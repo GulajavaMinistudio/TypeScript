@@ -19,13 +19,13 @@ const [a, b, cFromB, cFromA, cUse, d] = test.ranges();
 const cFromARanges = [cFromA, cUse];
 
 const aGroup = { definition: "const x: 0", ranges: [a] };
-const cFromAGroup = { definition: "import x", ranges: cFromARanges };
+const cFromAGroup = { definition: "(alias) const x: 0\nimport x", ranges: cFromARanges };
 
 verify.referenceGroups(a, [aGroup, cFromAGroup]);
 
 const bGroup = { definition: "const x: 0", ranges: [b] };
-const cFromBGroup = { definition: "import x", ranges: [cFromB] };
-const dGroup = { definition: "import x", ranges: [d] };
+const cFromBGroup = { definition: "(alias) const x: 0\nexport x", ranges: [cFromB] };
+const dGroup = { definition: "(alias) const x: 0\nimport x", ranges: [d] };
 verify.referenceGroups(b, [bGroup, cFromBGroup, dGroup]);
 
 verify.referenceGroups(cFromB, [cFromBGroup, dGroup, bGroup]);
@@ -33,5 +33,8 @@ verify.referenceGroups(cFromARanges, [cFromAGroup, aGroup]);
 
 verify.referenceGroups(d, [dGroup, cFromBGroup, bGroup]);
 
-verify.rangesAreRenameLocations([a, cFromA, cUse]);
-verify.rangesAreRenameLocations([b, cFromB, d]);
+verify.renameLocations(a, [a, cFromA, cUse]);
+verify.renameLocations([cFromA, cUse], [{ range: cFromA, prefixText: "x as " }, cUse]);
+verify.renameLocations(b, [b, { range: cFromB, suffixText: " as x" }]);
+verify.renameLocations(cFromB, [{ range: cFromB, prefixText: "x as " }, d]);
+verify.renameLocations(d, [{ range: d, prefixText: "x as " }]);

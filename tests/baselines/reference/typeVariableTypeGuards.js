@@ -6,7 +6,7 @@ interface Foo {
 }
 
 class A<P extends Partial<Foo>> {
-    props: Readonly<P>
+    constructor(public props: Readonly<P>) {}
     doSomething() {
         this.props.foo && this.props.foo()
     }
@@ -19,7 +19,7 @@ interface Banana {
 }
 
 class Monkey<T extends Banana | undefined> {
-    a: T;
+    constructor(public a: T) {}
     render() {
         if (this.a) {
             this.a.color;
@@ -86,25 +86,30 @@ function f5<T, K extends keyof T>(obj: T | undefined, key: K) {
 "use strict";
 // Repro from #14091
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
         d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
     };
 })();
-var A = (function () {
-    function A() {
+var A = /** @class */ (function () {
+    function A(props) {
+        this.props = props;
     }
     A.prototype.doSomething = function () {
         this.props.foo && this.props.foo();
     };
     return A;
 }());
-var Monkey = (function () {
-    function Monkey() {
+var Monkey = /** @class */ (function () {
+    function Monkey(a) {
+        this.a = a;
     }
     Monkey.prototype.render = function () {
         if (this.a) {
@@ -113,7 +118,7 @@ var Monkey = (function () {
     };
     return Monkey;
 }());
-var BigMonkey = (function (_super) {
+var BigMonkey = /** @class */ (function (_super) {
     __extends(BigMonkey, _super);
     function BigMonkey() {
         return _super !== null && _super.apply(this, arguments) || this;

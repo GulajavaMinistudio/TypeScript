@@ -9,20 +9,20 @@ class Test
 
     method()
     {
-        let a = b; // Block-scoped variable 'b' used before its declaration
+        let a = b; // Property 'b' is used before its initialization.
         let b = 3;
     }
 }
 
 
 //// [forwardRefInClassProperties.js]
-var Test = (function () {
+var Test = /** @class */ (function () {
     function Test() {
         this._b = this._a; // undefined, no error/warning
         this._a = 3;
     }
     Test.prototype.method = function () {
-        var a = b; // Block-scoped variable 'b' used before its declaration
+        var a = b; // Property 'b' is used before its initialization.
         var b = 3;
     };
     Test._B = Test._A; // undefined, no error/warning

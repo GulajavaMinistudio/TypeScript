@@ -29,9 +29,12 @@ class SuperObjectTest extends F {
 
 //// [super_inside-object-literal-getters-and-setters.js]
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
@@ -53,13 +56,13 @@ var ObjectLiteral;
         }
     };
 })(ObjectLiteral || (ObjectLiteral = {}));
-var F = (function () {
+var F = /** @class */ (function () {
     function F() {
     }
     F.prototype.test = function () { return ""; };
     return F;
 }());
-var SuperObjectTest = (function (_super) {
+var SuperObjectTest = /** @class */ (function (_super) {
     __extends(SuperObjectTest, _super);
     function SuperObjectTest() {
         return _super !== null && _super.apply(this, arguments) || this;

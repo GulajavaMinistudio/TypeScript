@@ -39,12 +39,12 @@ System.register([], function (exports_1, context_1) {
 //// [file3.js]
 System.register([], function (exports_1, context_1) {
     "use strict";
-    var __moduleName = context_1 && context_1.id;
     var C;
+    var __moduleName = context_1 && context_1.id;
     return {
         setters: [],
         execute: function () {
-            C = (function () {
+            C = /** @class */ (function () {
                 function C() {
                 }
                 return C;
@@ -56,12 +56,12 @@ System.register([], function (exports_1, context_1) {
 //// [file4.js]
 System.register([], function (exports_1, context_1) {
     "use strict";
-    var __moduleName = context_1 && context_1.id;
     var default_1;
+    var __moduleName = context_1 && context_1.id;
     return {
         setters: [],
         execute: function () {
-            default_1 = (function () {
+            default_1 = /** @class */ (function () {
                 function default_1() {
                 }
                 return default_1;

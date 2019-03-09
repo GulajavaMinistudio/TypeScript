@@ -9,7 +9,8 @@ function g() {
 
 //// [modifierOnClassExpressionMemberInFunction.js]
 function g() {
-    var x = (_a = (function () {
+    var _a;
+    var x = (_a = /** @class */ (function () {
             function C() {
                 this.prop1 = 1;
             }
@@ -18,7 +19,6 @@ function g() {
         }()),
         _a.prop2 = 43,
         _a);
-    var _a;
 }
 
 

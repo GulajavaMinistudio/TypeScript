@@ -13,16 +13,19 @@ class MyClass extends getClass(2) <string, number> {
 
 //// [declarationEmitExpressionInExtends2.js]
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
         d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
     };
 })();
-var C = (function () {
+var C = /** @class */ (function () {
     function C() {
     }
     return C;
@@ -30,7 +33,7 @@ var C = (function () {
 function getClass(c) {
     return C;
 }
-var MyClass = (function (_super) {
+var MyClass = /** @class */ (function (_super) {
     __extends(MyClass, _super);
     function MyClass() {
         return _super !== null && _super.apply(this, arguments) || this;

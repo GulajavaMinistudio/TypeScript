@@ -22,7 +22,7 @@ let y = x.getCountAsString().toLowerCase();
 //// [f1.js]
 "use strict";
 exports.__esModule = true;
-var A = (function () {
+var A = /** @class */ (function () {
     function A() {
     }
     return A;
@@ -44,7 +44,7 @@ var y = x.getCountAsString().toLowerCase();
 export declare class A {
 }
 //// [f2.d.ts]
-declare global  {
+declare global {
     interface Array<T> {
         getCountAsString(): string;
     }

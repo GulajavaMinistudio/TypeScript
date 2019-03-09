@@ -18,22 +18,25 @@ class SubclassOfSubclass extends Subclass {
 
 //// [subSubClassCanAccessProtectedConstructor.js]
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
         d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
     };
 })();
-var Base = (function () {
+var Base = /** @class */ (function () {
     function Base() {
         this.instance1 = new Base(); // allowed
     }
     return Base;
 }());
-var Subclass = (function (_super) {
+var Subclass = /** @class */ (function (_super) {
     __extends(Subclass, _super);
     function Subclass() {
         var _this = _super !== null && _super.apply(this, arguments) || this;
@@ -43,7 +46,7 @@ var Subclass = (function (_super) {
     }
     return Subclass;
 }(Base));
-var SubclassOfSubclass = (function (_super) {
+var SubclassOfSubclass = /** @class */ (function (_super) {
     __extends(SubclassOfSubclass, _super);
     function SubclassOfSubclass() {
         var _this = _super !== null && _super.apply(this, arguments) || this;

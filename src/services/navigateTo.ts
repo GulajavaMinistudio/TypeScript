@@ -1,199 +1,136 @@
 /* @internal */
 namespace ts.NavigateTo {
-    type RawNavigateToItem = { name: string; fileName: string; matchKind: PatternMatchKind; isCaseSensitive: boolean; declaration: Declaration };
+    interface RawNavigateToItem {
+        readonly name: string;
+        readonly fileName: string;
+        readonly matchKind: PatternMatchKind;
+        readonly isCaseSensitive: boolean;
+        readonly declaration: Declaration;
+    }
 
-    export function getNavigateToItems(sourceFiles: SourceFile[], checker: TypeChecker, cancellationToken: CancellationToken, searchValue: string, maxResultCount: number, excludeDtsFiles: boolean): NavigateToItem[] {
+    export function getNavigateToItems(sourceFiles: ReadonlyArray<SourceFile>, checker: TypeChecker, cancellationToken: CancellationToken, searchValue: string, maxResultCount: number | undefined, excludeDtsFiles: boolean): NavigateToItem[] {
         const patternMatcher = createPatternMatcher(searchValue);
-        let rawItems: RawNavigateToItem[] = [];
+        if (!patternMatcher) return emptyArray;
+        const rawItems: RawNavigateToItem[] = [];
 
         // Search the declarations in all files and output matched NavigateToItem into array of NavigateToItem[]
         for (const sourceFile of sourceFiles) {
             cancellationToken.throwIfCancellationRequested();
 
-            if (excludeDtsFiles && fileExtensionIs(sourceFile.fileName, Extension.Dts)) {
+            if (excludeDtsFiles && sourceFile.isDeclarationFile) {
                 continue;
             }
 
-            forEachEntry(sourceFile.getNamedDeclarations(), (declarations, name) => {
-                if (declarations) {
-                    // First do a quick check to see if the name of the declaration matches the
-                    // last portion of the (possibly) dotted name they're searching for.
-                    let matches = patternMatcher.getMatchesForLastSegmentOfPattern(name);
-
-                    if (!matches) {
-                        return; // continue to next named declarations
-                    }
-
-                    for (const declaration of declarations) {
-                        // It was a match!  If the pattern has dots in it, then also see if the
-                        // declaration container matches as well.
-                        if (patternMatcher.patternContainsDots) {
-                            const containers = getContainers(declaration);
-                            if (!containers) {
-                                return true; // Break out of named declarations and go to the next source file.
-                            }
-
-                            matches = patternMatcher.getMatches(containers, name);
-
-                            if (!matches) {
-                                return; // continue to next named declarations
-                            }
-                        }
-
-                        const fileName = sourceFile.fileName;
-                        const matchKind = bestMatchKind(matches);
-                        rawItems.push({ name, fileName, matchKind, isCaseSensitive: allMatchesAreCaseSensitive(matches), declaration });
-                    }
-                }
+            sourceFile.getNamedDeclarations().forEach((declarations, name) => {
+                getItemsFromNamedDeclaration(patternMatcher, name, declarations, checker, sourceFile.fileName, rawItems);
             });
         }
 
-        // Remove imports when the imported declaration is already in the list and has the same name.
-        rawItems = filter(rawItems, item => {
-            const decl = item.declaration;
-            if (decl.kind === SyntaxKind.ImportClause || decl.kind === SyntaxKind.ImportSpecifier || decl.kind === SyntaxKind.ImportEqualsDeclaration) {
-                const importer = checker.getSymbolAtLocation((decl as NamedDeclaration).name);
-                const imported = checker.getAliasedSymbol(importer);
-                return importer.escapedName !== imported.escapedName;
+        rawItems.sort(compareNavigateToItems);
+        return (maxResultCount === undefined ? rawItems : rawItems.slice(0, maxResultCount)).map(createNavigateToItem);
+    }
+
+    function getItemsFromNamedDeclaration(patternMatcher: PatternMatcher, name: string, declarations: ReadonlyArray<Declaration>, checker: TypeChecker, fileName: string, rawItems: Push<RawNavigateToItem>): void {
+        // First do a quick check to see if the name of the declaration matches the
+        // last portion of the (possibly) dotted name they're searching for.
+        const match = patternMatcher.getMatchForLastSegmentOfPattern(name);
+        if (!match) {
+            return; // continue to next named declarations
+        }
+
+        for (const declaration of declarations) {
+            if (!shouldKeepItem(declaration, checker)) continue;
+
+            if (patternMatcher.patternContainsDots) {
+                // If the pattern has dots in it, then also see if the declaration container matches as well.
+                const fullMatch = patternMatcher.getFullMatch(getContainers(declaration), name);
+                if (fullMatch) {
+                    rawItems.push({ name, fileName, matchKind: fullMatch.kind, isCaseSensitive: fullMatch.isCaseSensitive, declaration });
+                }
             }
             else {
+                rawItems.push({ name, fileName, matchKind: match.kind, isCaseSensitive: match.isCaseSensitive, declaration });
+            }
+        }
+    }
+
+    function shouldKeepItem(declaration: Declaration, checker: TypeChecker): boolean {
+        switch (declaration.kind) {
+            case SyntaxKind.ImportClause:
+            case SyntaxKind.ImportSpecifier:
+            case SyntaxKind.ImportEqualsDeclaration:
+                const importer = checker.getSymbolAtLocation((declaration as ImportClause | ImportSpecifier | ImportEqualsDeclaration).name!)!; // TODO: GH#18217
+                const imported = checker.getAliasedSymbol(importer);
+                return importer.escapedName !== imported.escapedName;
+            default:
                 return true;
-            }
-        });
-
-        rawItems.sort(compareNavigateToItems);
-        if (maxResultCount !== undefined) {
-            rawItems = rawItems.slice(0, maxResultCount);
         }
+    }
 
-        const items = map(rawItems, createNavigateToItem);
+    function tryAddSingleDeclarationName(declaration: Declaration, containers: Push<string>): boolean {
+        const name = getNameOfDeclaration(declaration);
+        return !!name && (pushLiteral(name, containers) || name.kind === SyntaxKind.ComputedPropertyName && tryAddComputedPropertyName(name.expression, containers));
+    }
 
-        return items;
+    // Only added the names of computed properties if they're simple dotted expressions, like:
+    //
+    //      [X.Y.Z]() { }
+    function tryAddComputedPropertyName(expression: Expression, containers: Push<string>): boolean {
+        return pushLiteral(expression, containers)
+            || isPropertyAccessExpression(expression) && (containers.push(expression.name.text), true) && tryAddComputedPropertyName(expression.expression, containers);
+    }
 
-        function allMatchesAreCaseSensitive(matches: PatternMatch[]): boolean {
-            Debug.assert(matches.length > 0);
+    function pushLiteral(node: Node, containers: Push<string>): boolean {
+        return isPropertyNameLiteral(node) && (containers.push(getTextOfIdentifierOrLiteral(node)), true);
+    }
 
-            // This is a case sensitive match, only if all the submatches were case sensitive.
-            for (const match of matches) {
-                if (!match.isCaseSensitive) {
-                    return false;
-                }
-            }
+    function getContainers(declaration: Declaration): ReadonlyArray<string> {
+        const containers: string[] = [];
 
-            return true;
+        // First, if we started with a computed property name, then add all but the last
+        // portion into the container array.
+        const name = getNameOfDeclaration(declaration);
+        if (name && name.kind === SyntaxKind.ComputedPropertyName && !tryAddComputedPropertyName(name.expression, containers)) {
+            return emptyArray;
         }
+        // Don't include the last portion.
+        containers.shift();
 
-        function tryAddSingleDeclarationName(declaration: Declaration, containers: string[]) {
-            if (declaration) {
-                const name = getNameOfDeclaration(declaration);
-                if (name) {
-                    const text = getTextOfIdentifierOrLiteral(name as (Identifier | LiteralExpression));
-                    if (text !== undefined) {
-                        containers.unshift(text);
-                    }
-                    else if (name.kind === SyntaxKind.ComputedPropertyName) {
-                        return tryAddComputedPropertyName((<ComputedPropertyName>name).expression, containers, /*includeLastPortion*/ true);
-                    }
-                    else {
-                        // Don't know how to add this.
-                        return false;
-                    }
-                }
+        // Now, walk up our containers, adding all their names to the container array.
+        let container = getContainerNode(declaration);
+
+        while (container) {
+            if (!tryAddSingleDeclarationName(container, containers)) {
+                return emptyArray;
             }
 
-            return true;
+            container = getContainerNode(container);
         }
 
-        // Only added the names of computed properties if they're simple dotted expressions, like:
-        //
-        //      [X.Y.Z]() { }
-        function tryAddComputedPropertyName(expression: Expression, containers: string[], includeLastPortion: boolean): boolean {
-            const text = getTextOfIdentifierOrLiteral(expression as LiteralExpression);
-            if (text !== undefined) {
-                if (includeLastPortion) {
-                    containers.unshift(text);
-                }
-                return true;
-            }
+        return containers.reverse();
+    }
 
-            if (expression.kind === SyntaxKind.PropertyAccessExpression) {
-                const propertyAccess = <PropertyAccessExpression>expression;
-                if (includeLastPortion) {
-                    containers.unshift(propertyAccess.name.text);
-                }
+    function compareNavigateToItems(i1: RawNavigateToItem, i2: RawNavigateToItem) {
+        // TODO(cyrusn): get the gamut of comparisons that VS already uses here.
+        return compareValues(i1.matchKind, i2.matchKind)
+            || compareStringsCaseSensitiveUI(i1.name, i2.name);
+    }
 
-                return tryAddComputedPropertyName(propertyAccess.expression, containers, /*includeLastPortion*/ true);
-            }
-
-            return false;
-        }
-
-        function getContainers(declaration: Declaration) {
-            const containers: string[] = [];
-
-            // First, if we started with a computed property name, then add all but the last
-            // portion into the container array.
-            const name = getNameOfDeclaration(declaration);
-            if (name.kind === SyntaxKind.ComputedPropertyName) {
-                if (!tryAddComputedPropertyName((<ComputedPropertyName>name).expression, containers, /*includeLastPortion*/ false)) {
-                    return undefined;
-                }
-            }
-
-            // Now, walk up our containers, adding all their names to the container array.
-            declaration = getContainerNode(declaration);
-
-            while (declaration) {
-                if (!tryAddSingleDeclarationName(declaration, containers)) {
-                    return undefined;
-                }
-
-                declaration = getContainerNode(declaration);
-            }
-
-            return containers;
-        }
-
-        function bestMatchKind(matches: PatternMatch[]) {
-            Debug.assert(matches.length > 0);
-            let bestMatchKind = PatternMatchKind.camelCase;
-
-            for (const match of matches) {
-                const kind = match.kind;
-                if (kind < bestMatchKind) {
-                    bestMatchKind = kind;
-                }
-            }
-
-            return bestMatchKind;
-        }
-
-        function compareNavigateToItems(i1: RawNavigateToItem, i2: RawNavigateToItem) {
-            // TODO(cyrusn): get the gamut of comparisons that VS already uses here.
-            // Right now we just sort by kind first, and then by name of the item.
-            // We first sort case insensitively.  So "Aaa" will come before "bar".
-            // Then we sort case sensitively, so "aaa" will come before "Aaa".
-            return i1.matchKind - i2.matchKind ||
-                ts.compareStringsCaseInsensitive(i1.name, i2.name) ||
-                ts.compareStrings(i1.name, i2.name);
-        }
-
-        function createNavigateToItem(rawItem: RawNavigateToItem): NavigateToItem {
-            const declaration = rawItem.declaration;
-            const container = <Declaration>getContainerNode(declaration);
-            const containerName = container && getNameOfDeclaration(container);
-            return {
-                name: rawItem.name,
-                kind: getNodeKind(declaration),
-                kindModifiers: getNodeModifiers(declaration),
-                matchKind: PatternMatchKind[rawItem.matchKind],
-                isCaseSensitive: rawItem.isCaseSensitive,
-                fileName: rawItem.fileName,
-                textSpan: createTextSpanFromNode(declaration),
-                // TODO(jfreeman): What should be the containerName when the container has a computed name?
-                containerName: containerName ? (<Identifier>containerName).text : "",
-                containerKind: containerName ? getNodeKind(container) : ScriptElementKind.unknown
-            };
-        }
+    function createNavigateToItem(rawItem: RawNavigateToItem): NavigateToItem {
+        const declaration = rawItem.declaration;
+        const container = getContainerNode(declaration);
+        const containerName = container && getNameOfDeclaration(container);
+        return {
+            name: rawItem.name,
+            kind: getNodeKind(declaration),
+            kindModifiers: getNodeModifiers(declaration),
+            matchKind: PatternMatchKind[rawItem.matchKind] as keyof typeof PatternMatchKind,
+            isCaseSensitive: rawItem.isCaseSensitive,
+            fileName: rawItem.fileName,
+            textSpan: createTextSpanFromNode(declaration),
+            // TODO(jfreeman): What should be the containerName when the container has a computed name?
+            containerName: containerName ? (<Identifier>containerName).text : "",
+            containerKind: containerName ? getNodeKind(container!) : ScriptElementKind.unknown, // TODO: GH#18217 Just use `container ? ...`
+        };
     }
 }

@@ -1,6 +1,7 @@
 // @filename: file.tsx
 // @jsx: preserve
 // @noLib: true
+// @skipLibCheck: true
 // @libFiles: react.d.ts,lib.d.ts
 
 import React = require('react');
@@ -17,6 +18,9 @@ class Poisoned extends React.Component<PoisonedProp, {}> {
 }
 
 const obj = {};
+
+// OK
+<Poisoned {...{x: "ok", y: "2"}} />;
 
 // Error
 let p = <Poisoned {...obj} />;

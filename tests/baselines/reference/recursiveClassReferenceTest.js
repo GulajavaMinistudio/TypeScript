@@ -106,9 +106,12 @@ module Sample.Thing.Languages.PlainText {
 // Scenario 1: Test reqursive function call with "this" parameter
 // Scenario 2: Test recursive function call with cast and "this" parameter
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
@@ -123,7 +126,7 @@ var Sample;
         (function (Thing_1) {
             var Find;
             (function (Find) {
-                var StartFindAction = (function () {
+                var StartFindAction = /** @class */ (function () {
                     function StartFindAction() {
                     }
                     StartFindAction.prototype.getId = function () { return "yo"; };
@@ -142,7 +145,7 @@ var Sample;
     (function (Thing) {
         var Widgets;
         (function (Widgets) {
-            var FindWidget = (function () {
+            var FindWidget = /** @class */ (function () {
                 function FindWidget(codeThing) {
                     this.codeThing = codeThing;
                     this.domNode = null;
@@ -163,7 +166,7 @@ var Sample;
         })(Widgets = Thing.Widgets || (Thing.Widgets = {}));
     })(Thing = Sample.Thing || (Sample.Thing = {}));
 })(Sample || (Sample = {}));
-var AbstractMode = (function () {
+var AbstractMode = /** @class */ (function () {
     function AbstractMode() {
     }
     AbstractMode.prototype.getInitialState = function () { return null; };
@@ -176,7 +179,7 @@ var AbstractMode = (function () {
         (function (Languages) {
             var PlainText;
             (function (PlainText) {
-                var State = (function () {
+                var State = /** @class */ (function () {
                     function State(mode) {
                         this.mode = mode;
                     }
@@ -190,7 +193,7 @@ var AbstractMode = (function () {
                     return State;
                 }());
                 PlainText.State = State;
-                var Mode = (function (_super) {
+                var Mode = /** @class */ (function (_super) {
                     __extends(Mode, _super);
                     function Mode() {
                         return _super !== null && _super.apply(this, arguments) || this;

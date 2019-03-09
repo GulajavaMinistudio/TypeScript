@@ -32,9 +32,12 @@ module TypeScript {
 
 //// [genericRecursiveImplicitConstructorErrors3.js]
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
@@ -43,7 +46,7 @@ var __extends = (this && this.__extends) || (function () {
 })();
 var TypeScript;
 (function (TypeScript) {
-    var MemberName = (function () {
+    var MemberName = /** @class */ (function () {
         function MemberName() {
         }
         MemberName.create = function (arg1, arg2, arg3) {
@@ -53,14 +56,14 @@ var TypeScript;
     TypeScript.MemberName = MemberName;
 })(TypeScript || (TypeScript = {}));
 (function (TypeScript) {
-    var PullSymbol = (function () {
+    var PullSymbol = /** @class */ (function () {
         function PullSymbol() {
             this.type = null;
         }
         return PullSymbol;
     }());
     TypeScript.PullSymbol = PullSymbol;
-    var PullTypeSymbol = (function (_super) {
+    var PullTypeSymbol = /** @class */ (function (_super) {
         __extends(PullTypeSymbol, _super);
         function PullTypeSymbol() {
             var _this = _super !== null && _super.apply(this, arguments) || this;

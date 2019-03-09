@@ -5,6 +5,9 @@ f1(1,);
 
 function f2(...args,) {}
 
+// Allowed for ambient declarations
+declare function f25(...args,): void;
+
 f2(...[],);
 
 // Not confused by overloads
@@ -41,7 +44,7 @@ f2.apply(void 0, []);
 f3(1);
 f3(1, 2);
 // Works for constructors too
-var X = (function () {
+var X = /** @class */ (function () {
     function X(a) {
     }
     Object.defineProperty(X.prototype, "x", {

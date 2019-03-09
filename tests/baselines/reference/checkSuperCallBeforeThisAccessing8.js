@@ -12,16 +12,19 @@ class Super extends Base {
 
 //// [checkSuperCallBeforeThisAccessing8.js]
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
         d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
     };
 })();
-var Base = (function () {
+var Base = /** @class */ (function () {
     function Base() {
         var arg = [];
         for (var _i = 0; _i < arguments.length; _i++) {
@@ -30,7 +33,7 @@ var Base = (function () {
     }
     return Base;
 }());
-var Super = (function (_super) {
+var Super = /** @class */ (function (_super) {
     __extends(Super, _super);
     function Super() {
         var _this = this;

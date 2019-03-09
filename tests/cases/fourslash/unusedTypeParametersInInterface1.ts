@@ -4,4 +4,7 @@
 // @noUnusedParameters: true
 //// [|interface I<T> {}|]
 
-verify.rangeAfterCodeFix("interface I {}");
+verify.codeFix({
+    description: "Remove type parameters",
+    newRangeContent: "interface I {}",
+});

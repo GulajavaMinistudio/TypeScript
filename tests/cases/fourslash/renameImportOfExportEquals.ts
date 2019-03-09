@@ -22,14 +22,16 @@ const bRanges = [b0, b1];
 const xRanges = [x0, x1];
 
 const nGroup = { definition: "namespace N", ranges: nRanges };
-const aGroup = { definition: "import N", ranges: aRanges };
-const bGroup = { definition: "import N", ranges: [b0, b1] };
+const aGroup = { definition: "(alias) namespace N\nimport N", ranges: aRanges };
+const bGroup = { definition: "(alias) namespace N\nimport N", ranges: [b0, b1] };
 
 verify.referenceGroups(nRanges, [nGroup, aGroup, bGroup]);
 verify.referenceGroups([a0, a1], [aGroup, nGroup, bGroup]);
 verify.referenceGroups(bRanges, [bGroup, aGroup, nGroup]);
 verify.singleReferenceGroup("var N.x: number", xRanges);
 
-verify.renameLocations(nRanges, nRanges.concat(aRanges, bRanges));
-verify.rangesAreRenameLocations(aRanges.concat(bRanges));
+verify.renameLocations(nRanges, [N0, N1, a0, { range: a1, suffixText: " as N" }]);
+verify.renameLocations(a0, [a0, { range: a1, suffixText: " as N" }]);
+verify.renameLocations(a1, [{ range: a1, prefixText: "N as " }, ...bRanges]);
+verify.renameLocations(bRanges, [{ range: b0, prefixText: "N as " }, b1]);
 verify.rangesAreRenameLocations(xRanges);

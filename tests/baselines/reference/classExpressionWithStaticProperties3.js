@@ -10,9 +10,10 @@ for (let i = 0; i < 3; i++) {
 arr.forEach(C => console.log(C.y()));
 
 //// [classExpressionWithStaticProperties3.js]
+var _a;
 var arr = [];
 var _loop_1 = function (i) {
-    arr.push((_a = (function () {
+    arr.push((_a = /** @class */ (function () {
             function C() {
             }
             return C;
@@ -25,4 +26,3 @@ for (var i = 0; i < 3; i++) {
     _loop_1(i);
 }
 arr.forEach(function (C) { return console.log(C.y()); });
-var _a;

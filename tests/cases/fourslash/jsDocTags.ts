@@ -26,20 +26,20 @@
 ////     /**
 ////      * @mytag1 some comments
 ////      * some more comments about mytag1
-////      * @mytag2 
+////      * @mytag2
 ////      * here all the comments are on a new line
-////      * @mytag3 
+////      * @mytag3
 ////      * @mytag
 ////      */
 ////     property2: number;
-////     /** 
+////     /**
 ////      * @returns {number} a value
 ////      */
 ////     method3(): number { return 3; }
 ////     /**
 ////      * @param {string} foo A value.
 ////      * @returns {number} Another value
-////      * @mytag 
+////      * @mytag
 ////      */
 ////     method4(foo: string): number { return 3; }
 ////     /** @mytag */
@@ -61,15 +61,28 @@
 
 verify.baselineQuickInfo();
 
+verify.signatureHelp(
+    {
+        marker: "10",
+        docComment: "This is the constructor.",
+        tags: [{ name: "myjsdoctag", text:"this is a comment" }],
+    },
+    {
+        marker: "11",
+        docComment: "method1 documentation",
+        tags: [{ name: "mytag", text: "comment1 comment2" }],
+    },
+    { marker: "12", tags: [{ name: "mytag", text: undefined }] },
+    { marker: "13", tags: [{ name: "returns", text: "a value" }] },
+);
 
-goTo.marker("10");
-verify.currentSignatureHelpTagsAre([{name: "myjsdoctag", text:"this is a comment"}])
-goTo.marker("11");
-verify.currentSignatureHelpTagsAre([{name: "mytag", text:"comment1 comment2"}])
-goTo.marker("12");
-verify.currentSignatureHelpTagsAre([{name: "mytag", text:""}])
-goTo.marker("13");
-verify.currentSignatureHelpTagsAre([])
-
-goTo.marker('14');
-verify.completionEntryDetailIs("newMethod", "(method) Foo.newMethod(): void", "method documentation", "method", [{name: "mytag", text: "a JSDoc tag"}]);
+verify.completions({
+    marker: "14",
+    includes: {
+        name: "newMethod",
+        text: "(method) Foo.newMethod(): void",
+        documentation: "method documentation",
+        kind: "method",
+        tags: [{ name: "mytag", text: "a JSDoc tag" }],
+    },
+});

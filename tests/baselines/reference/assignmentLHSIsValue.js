@@ -72,9 +72,12 @@ foo() = value;
 
 //// [assignmentLHSIsValue.js]
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
@@ -84,7 +87,7 @@ var __extends = (this && this.__extends) || (function () {
 // expected error for all the LHS of assignments
 var value;
 // this
-var C = (function () {
+var C = /** @class */ (function () {
     function C() {
         this = value;
     }
@@ -120,7 +123,7 @@ value;
 // array literals
 '' = value[0], '' = value[1];
 // super
-var Derived = (function (_super) {
+var Derived = /** @class */ (function (_super) {
     __extends(Derived, _super);
     function Derived() {
         var _this = _super.call(this) || this;

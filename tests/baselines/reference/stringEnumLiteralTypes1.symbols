@@ -90,47 +90,47 @@ function f3(a: Choice.Yes, b: YesNo) {
 >b : Symbol(b, Decl(stringEnumLiteralTypes1.ts, 19, 26))
 
     var y = a == b;
->y : Symbol(y, Decl(stringEnumLiteralTypes1.ts, 21, 7), Decl(stringEnumLiteralTypes1.ts, 22, 7), Decl(stringEnumLiteralTypes1.ts, 23, 7), Decl(stringEnumLiteralTypes1.ts, 24, 7), Decl(stringEnumLiteralTypes1.ts, 25, 7), Decl(stringEnumLiteralTypes1.ts, 26, 7), Decl(stringEnumLiteralTypes1.ts, 27, 7), Decl(stringEnumLiteralTypes1.ts, 28, 7), Decl(stringEnumLiteralTypes1.ts, 29, 7))
+>y : Symbol(y, Decl(stringEnumLiteralTypes1.ts, 21, 7), Decl(stringEnumLiteralTypes1.ts, 22, 7), Decl(stringEnumLiteralTypes1.ts, 23, 7), Decl(stringEnumLiteralTypes1.ts, 24, 7), Decl(stringEnumLiteralTypes1.ts, 25, 7) ... and 4 more)
 >a : Symbol(a, Decl(stringEnumLiteralTypes1.ts, 19, 12))
 >b : Symbol(b, Decl(stringEnumLiteralTypes1.ts, 19, 26))
 
     var y = a != b;
->y : Symbol(y, Decl(stringEnumLiteralTypes1.ts, 21, 7), Decl(stringEnumLiteralTypes1.ts, 22, 7), Decl(stringEnumLiteralTypes1.ts, 23, 7), Decl(stringEnumLiteralTypes1.ts, 24, 7), Decl(stringEnumLiteralTypes1.ts, 25, 7), Decl(stringEnumLiteralTypes1.ts, 26, 7), Decl(stringEnumLiteralTypes1.ts, 27, 7), Decl(stringEnumLiteralTypes1.ts, 28, 7), Decl(stringEnumLiteralTypes1.ts, 29, 7))
+>y : Symbol(y, Decl(stringEnumLiteralTypes1.ts, 21, 7), Decl(stringEnumLiteralTypes1.ts, 22, 7), Decl(stringEnumLiteralTypes1.ts, 23, 7), Decl(stringEnumLiteralTypes1.ts, 24, 7), Decl(stringEnumLiteralTypes1.ts, 25, 7) ... and 4 more)
 >a : Symbol(a, Decl(stringEnumLiteralTypes1.ts, 19, 12))
 >b : Symbol(b, Decl(stringEnumLiteralTypes1.ts, 19, 26))
 
     var y = a === b;
->y : Symbol(y, Decl(stringEnumLiteralTypes1.ts, 21, 7), Decl(stringEnumLiteralTypes1.ts, 22, 7), Decl(stringEnumLiteralTypes1.ts, 23, 7), Decl(stringEnumLiteralTypes1.ts, 24, 7), Decl(stringEnumLiteralTypes1.ts, 25, 7), Decl(stringEnumLiteralTypes1.ts, 26, 7), Decl(stringEnumLiteralTypes1.ts, 27, 7), Decl(stringEnumLiteralTypes1.ts, 28, 7), Decl(stringEnumLiteralTypes1.ts, 29, 7))
+>y : Symbol(y, Decl(stringEnumLiteralTypes1.ts, 21, 7), Decl(stringEnumLiteralTypes1.ts, 22, 7), Decl(stringEnumLiteralTypes1.ts, 23, 7), Decl(stringEnumLiteralTypes1.ts, 24, 7), Decl(stringEnumLiteralTypes1.ts, 25, 7) ... and 4 more)
 >a : Symbol(a, Decl(stringEnumLiteralTypes1.ts, 19, 12))
 >b : Symbol(b, Decl(stringEnumLiteralTypes1.ts, 19, 26))
 
     var y = a !== b;
->y : Symbol(y, Decl(stringEnumLiteralTypes1.ts, 21, 7), Decl(stringEnumLiteralTypes1.ts, 22, 7), Decl(stringEnumLiteralTypes1.ts, 23, 7), Decl(stringEnumLiteralTypes1.ts, 24, 7), Decl(stringEnumLiteralTypes1.ts, 25, 7), Decl(stringEnumLiteralTypes1.ts, 26, 7), Decl(stringEnumLiteralTypes1.ts, 27, 7), Decl(stringEnumLiteralTypes1.ts, 28, 7), Decl(stringEnumLiteralTypes1.ts, 29, 7))
+>y : Symbol(y, Decl(stringEnumLiteralTypes1.ts, 21, 7), Decl(stringEnumLiteralTypes1.ts, 22, 7), Decl(stringEnumLiteralTypes1.ts, 23, 7), Decl(stringEnumLiteralTypes1.ts, 24, 7), Decl(stringEnumLiteralTypes1.ts, 25, 7) ... and 4 more)
 >a : Symbol(a, Decl(stringEnumLiteralTypes1.ts, 19, 12))
 >b : Symbol(b, Decl(stringEnumLiteralTypes1.ts, 19, 26))
 
     var y = a > b;
->y : Symbol(y, Decl(stringEnumLiteralTypes1.ts, 21, 7), Decl(stringEnumLiteralTypes1.ts, 22, 7), Decl(stringEnumLiteralTypes1.ts, 23, 7), Decl(stringEnumLiteralTypes1.ts, 24, 7), Decl(stringEnumLiteralTypes1.ts, 25, 7), Decl(stringEnumLiteralTypes1.ts, 26, 7), Decl(stringEnumLiteralTypes1.ts, 27, 7), Decl(stringEnumLiteralTypes1.ts, 28, 7), Decl(stringEnumLiteralTypes1.ts, 29, 7))
+>y : Symbol(y, Decl(stringEnumLiteralTypes1.ts, 21, 7), Decl(stringEnumLiteralTypes1.ts, 22, 7), Decl(stringEnumLiteralTypes1.ts, 23, 7), Decl(stringEnumLiteralTypes1.ts, 24, 7), Decl(stringEnumLiteralTypes1.ts, 25, 7) ... and 4 more)
 >a : Symbol(a, Decl(stringEnumLiteralTypes1.ts, 19, 12))
 >b : Symbol(b, Decl(stringEnumLiteralTypes1.ts, 19, 26))
 
     var y = a < b;
->y : Symbol(y, Decl(stringEnumLiteralTypes1.ts, 21, 7), Decl(stringEnumLiteralTypes1.ts, 22, 7), Decl(stringEnumLiteralTypes1.ts, 23, 7), Decl(stringEnumLiteralTypes1.ts, 24, 7), Decl(stringEnumLiteralTypes1.ts, 25, 7), Decl(stringEnumLiteralTypes1.ts, 26, 7), Decl(stringEnumLiteralTypes1.ts, 27, 7), Decl(stringEnumLiteralTypes1.ts, 28, 7), Decl(stringEnumLiteralTypes1.ts, 29, 7))
+>y : Symbol(y, Decl(stringEnumLiteralTypes1.ts, 21, 7), Decl(stringEnumLiteralTypes1.ts, 22, 7), Decl(stringEnumLiteralTypes1.ts, 23, 7), Decl(stringEnumLiteralTypes1.ts, 24, 7), Decl(stringEnumLiteralTypes1.ts, 25, 7) ... and 4 more)
 >a : Symbol(a, Decl(stringEnumLiteralTypes1.ts, 19, 12))
 >b : Symbol(b, Decl(stringEnumLiteralTypes1.ts, 19, 26))
 
     var y = a >= b;
->y : Symbol(y, Decl(stringEnumLiteralTypes1.ts, 21, 7), Decl(stringEnumLiteralTypes1.ts, 22, 7), Decl(stringEnumLiteralTypes1.ts, 23, 7), Decl(stringEnumLiteralTypes1.ts, 24, 7), Decl(stringEnumLiteralTypes1.ts, 25, 7), Decl(stringEnumLiteralTypes1.ts, 26, 7), Decl(stringEnumLiteralTypes1.ts, 27, 7), Decl(stringEnumLiteralTypes1.ts, 28, 7), Decl(stringEnumLiteralTypes1.ts, 29, 7))
+>y : Symbol(y, Decl(stringEnumLiteralTypes1.ts, 21, 7), Decl(stringEnumLiteralTypes1.ts, 22, 7), Decl(stringEnumLiteralTypes1.ts, 23, 7), Decl(stringEnumLiteralTypes1.ts, 24, 7), Decl(stringEnumLiteralTypes1.ts, 25, 7) ... and 4 more)
 >a : Symbol(a, Decl(stringEnumLiteralTypes1.ts, 19, 12))
 >b : Symbol(b, Decl(stringEnumLiteralTypes1.ts, 19, 26))
 
     var y = a <= b;
->y : Symbol(y, Decl(stringEnumLiteralTypes1.ts, 21, 7), Decl(stringEnumLiteralTypes1.ts, 22, 7), Decl(stringEnumLiteralTypes1.ts, 23, 7), Decl(stringEnumLiteralTypes1.ts, 24, 7), Decl(stringEnumLiteralTypes1.ts, 25, 7), Decl(stringEnumLiteralTypes1.ts, 26, 7), Decl(stringEnumLiteralTypes1.ts, 27, 7), Decl(stringEnumLiteralTypes1.ts, 28, 7), Decl(stringEnumLiteralTypes1.ts, 29, 7))
+>y : Symbol(y, Decl(stringEnumLiteralTypes1.ts, 21, 7), Decl(stringEnumLiteralTypes1.ts, 22, 7), Decl(stringEnumLiteralTypes1.ts, 23, 7), Decl(stringEnumLiteralTypes1.ts, 24, 7), Decl(stringEnumLiteralTypes1.ts, 25, 7) ... and 4 more)
 >a : Symbol(a, Decl(stringEnumLiteralTypes1.ts, 19, 12))
 >b : Symbol(b, Decl(stringEnumLiteralTypes1.ts, 19, 26))
 
     var y = !b;
->y : Symbol(y, Decl(stringEnumLiteralTypes1.ts, 21, 7), Decl(stringEnumLiteralTypes1.ts, 22, 7), Decl(stringEnumLiteralTypes1.ts, 23, 7), Decl(stringEnumLiteralTypes1.ts, 24, 7), Decl(stringEnumLiteralTypes1.ts, 25, 7), Decl(stringEnumLiteralTypes1.ts, 26, 7), Decl(stringEnumLiteralTypes1.ts, 27, 7), Decl(stringEnumLiteralTypes1.ts, 28, 7), Decl(stringEnumLiteralTypes1.ts, 29, 7))
+>y : Symbol(y, Decl(stringEnumLiteralTypes1.ts, 21, 7), Decl(stringEnumLiteralTypes1.ts, 22, 7), Decl(stringEnumLiteralTypes1.ts, 23, 7), Decl(stringEnumLiteralTypes1.ts, 24, 7), Decl(stringEnumLiteralTypes1.ts, 25, 7) ... and 4 more)
 >b : Symbol(b, Decl(stringEnumLiteralTypes1.ts, 19, 26))
 }
 
@@ -195,7 +195,7 @@ function assertNever(x: never): never {
 >x : Symbol(x, Decl(stringEnumLiteralTypes1.ts, 44, 21))
 
     throw new Error("Unexpected value");
->Error : Symbol(Error, Decl(lib.d.ts, --, --), Decl(lib.d.ts, --, --))
+>Error : Symbol(Error, Decl(lib.es5.d.ts, --, --), Decl(lib.es5.d.ts, --, --))
 }
 
 function f10(x: YesNo) {

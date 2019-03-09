@@ -1,2 +1,3 @@
-/// <reference path="lib.es2017.d.ts" />
-/// <reference path="lib.esnext.asynciterable.d.ts" />
+/// <reference lib="es2019" />
+/// <reference lib="esnext.bigint" />
+/// <reference lib="esnext.intl" />

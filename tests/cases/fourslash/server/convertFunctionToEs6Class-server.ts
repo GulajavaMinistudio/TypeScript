@@ -11,15 +11,17 @@
 ////     console.log('hello world');
 //// }
 
-verify.applicableRefactorAvailableAtMarker('1');
-verify.fileAfterApplyingRefactorAtMarker('1',
-`// Comment
-class fn {
-    constructor() {
-        this.baz = 10;
-    }
-    bar() {
-        console.log('hello world');
-    }
-}
-`, 'Convert to ES2015 class', 'convert');
+verify.codeFix({
+    description: "Convert function to an ES2015 class",
+    newFileContent:
+`// Comment\r
+class fn {\r
+    constructor() {\r
+        this.baz = 10;\r
+    }\r
+    bar() {\r
+        console.log('hello world');\r
+    }\r
+}\r
+`,
+});

@@ -1,5 +1,5 @@
-/// <reference path="lib.es2015.symbol.d.ts" />
-/// <reference path="lib.es2015.symbol.wellknown.d.ts" />
+/// <reference lib="es2015.symbol" />
+/// <reference lib="es2015.symbol.wellknown" />
 
 interface SharedArrayBuffer {
     /**
@@ -103,7 +103,7 @@ interface Atomics {
      * Wakes up sleeping agents that are waiting on the given index of the array, returning the
      * number of agents that were awoken.
      */
-    wake(typedArray: Int32Array, index: number, count: number): number;
+    notify(typedArray: Int32Array, index: number, count: number): number;
 
     /**
      * Stores the bitwise XOR of a value with the value at the given position in the array,

@@ -13,7 +13,7 @@ class y extends x {}
 
 //// [foo1.js]
 "use strict";
-var x = (function () {
+var x = /** @class */ (function () {
     function x() {
     }
     return x;
@@ -22,9 +22,12 @@ module.exports = x;
 //// [foo2.js]
 "use strict";
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
@@ -34,7 +37,7 @@ var __extends = (this && this.__extends) || (function () {
 exports.__esModule = true;
 var foo1 = require("./foo1");
 var x = foo1;
-var y = (function (_super) {
+var y = /** @class */ (function (_super) {
     __extends(y, _super);
     function y() {
         return _super !== null && _super.apply(this, arguments) || this;

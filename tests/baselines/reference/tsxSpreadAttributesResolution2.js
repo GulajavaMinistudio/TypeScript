@@ -14,6 +14,9 @@ class Poisoned extends React.Component<PoisonedProp, {}> {
 
 const obj = {};
 
+// OK
+<Poisoned {...{x: "ok", y: "2"}} />;
+
 // Error
 let p = <Poisoned {...obj} />;
 let y = <Poisoned />;
@@ -24,9 +27,12 @@ let w1 = <Poisoned {...{x: 5, y: "2"}} X="hi" />;
 //// [file.jsx]
 "use strict";
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
@@ -35,7 +41,7 @@ var __extends = (this && this.__extends) || (function () {
 })();
 exports.__esModule = true;
 var React = require("react");
-var Poisoned = (function (_super) {
+var Poisoned = /** @class */ (function (_super) {
     __extends(Poisoned, _super);
     function Poisoned() {
         return _super !== null && _super.apply(this, arguments) || this;
@@ -46,6 +52,8 @@ var Poisoned = (function (_super) {
     return Poisoned;
 }(React.Component));
 var obj = {};
+// OK
+<Poisoned {...{ x: "ok", y: "2" }}/>;
 // Error
 var p = <Poisoned {...obj}/>;
 var y = <Poisoned />;

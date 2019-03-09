@@ -1,7 +1,7 @@
 //// [recursiveTypeRelations.ts]
 // Repro from #14896
 
-type Attributes<Keys extends string> = {
+type Attributes<Keys extends keyof any> = {
     [Key in Keys]: string;
 }
 
@@ -40,7 +40,7 @@ export function css<S extends { [K in keyof S]: string }>(styles: S, ...classNam
 "use strict";
 // Repro from #14896
 exports.__esModule = true;
-var Query = (function () {
+var Query = /** @class */ (function () {
     function Query() {
     }
     return Query;

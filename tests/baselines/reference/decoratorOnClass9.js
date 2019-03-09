@@ -15,9 +15,12 @@ class B extends A {
 
 //// [decoratorOnClass9.js]
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
@@ -30,13 +33,13 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
     else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
     return c > 3 && r && Object.defineProperty(target, key, r), r;
 };
-var A = (function () {
+var A = /** @class */ (function () {
     function A() {
     }
     return A;
 }());
 // https://github.com/Microsoft/TypeScript/issues/16417
-var B = (function (_super) {
+var B = /** @class */ (function (_super) {
     __extends(B, _super);
     function B() {
         return _super !== null && _super.apply(this, arguments) || this;
@@ -45,11 +48,11 @@ var B = (function (_super) {
     B.prototype.m = function () {
         return B_1.x;
     };
+    var B_1;
     B.x = 1;
     B.y = B_1.x;
     B = B_1 = __decorate([
         dec
     ], B);
     return B;
-    var B_1;
 }(A));

@@ -32,23 +32,26 @@ class OtherDerived extends OtherBase {
 
 //// [superCalls.js]
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
         d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
     };
 })();
-var Base = (function () {
+var Base = /** @class */ (function () {
     function Base(n) {
         this.x = 43;
     }
     return Base;
 }());
 function v() { }
-var Derived = (function (_super) {
+var Derived = /** @class */ (function (_super) {
     __extends(Derived, _super);
     //super call in class constructor of derived type
     function Derived(q) {
@@ -61,12 +64,12 @@ var Derived = (function (_super) {
     }
     return Derived;
 }(Base));
-var OtherBase = (function () {
+var OtherBase = /** @class */ (function () {
     function OtherBase() {
     }
     return OtherBase;
 }());
-var OtherDerived = (function (_super) {
+var OtherDerived = /** @class */ (function (_super) {
     __extends(OtherDerived, _super);
     function OtherDerived() {
         var _this = this;

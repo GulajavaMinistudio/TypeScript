@@ -19,21 +19,24 @@ var a: Bbb.SomeType;
 
 //// [exportDeclarationInInternalModule.js]
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
         d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
     };
 })();
-var Bbb = (function () {
+var Bbb = /** @class */ (function () {
     function Bbb() {
     }
     return Bbb;
 }());
-var Aaa = (function (_super) {
+var Aaa = /** @class */ (function (_super) {
     __extends(Aaa, _super);
     function Aaa() {
         return _super !== null && _super.apply(this, arguments) || this;
@@ -41,7 +44,7 @@ var Aaa = (function (_super) {
     return Aaa;
 }(Bbb));
 (function (Aaa) {
-    var SomeType = (function () {
+    var SomeType = /** @class */ (function () {
         function SomeType() {
         }
         return SomeType;
@@ -49,7 +52,7 @@ var Aaa = (function (_super) {
     Aaa.SomeType = SomeType;
 })(Aaa || (Aaa = {}));
 (function (Bbb) {
-    var SomeType = (function () {
+    var SomeType = /** @class */ (function () {
         function SomeType() {
         }
         return SomeType;
@@ -69,7 +72,7 @@ declare module Aaa {
     }
 }
 declare module Bbb {
-    class SomeType {
+    export class SomeType {
     }
     export * from Aaa;
 }

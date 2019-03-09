@@ -143,16 +143,19 @@ interface MimicGuardInterface {
 
 //// [typeGuardFunctionOfFormThis.js]
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
         d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
     };
 })();
-var RoyalGuard = (function () {
+var RoyalGuard = /** @class */ (function () {
     function RoyalGuard() {
     }
     RoyalGuard.prototype.isLeader = function () {
@@ -163,7 +166,7 @@ var RoyalGuard = (function () {
     };
     return RoyalGuard;
 }());
-var LeadGuard = (function (_super) {
+var LeadGuard = /** @class */ (function (_super) {
     __extends(LeadGuard, _super);
     function LeadGuard() {
         return _super !== null && _super.apply(this, arguments) || this;
@@ -172,7 +175,7 @@ var LeadGuard = (function (_super) {
     ;
     return LeadGuard;
 }(RoyalGuard));
-var FollowerGuard = (function (_super) {
+var FollowerGuard = /** @class */ (function (_super) {
     __extends(FollowerGuard, _super);
     function FollowerGuard() {
         return _super !== null && _super.apply(this, arguments) || this;
@@ -214,7 +217,7 @@ if (holder2.a.isLeader()) {
 else {
     holder2.a;
 }
-var ArrowGuard = (function () {
+var ArrowGuard = /** @class */ (function () {
     function ArrowGuard() {
         var _this = this;
         this.isElite = function () {
@@ -226,7 +229,7 @@ var ArrowGuard = (function () {
     }
     return ArrowGuard;
 }());
-var ArrowElite = (function (_super) {
+var ArrowElite = /** @class */ (function (_super) {
     __extends(ArrowElite, _super);
     function ArrowElite() {
         return _super !== null && _super.apply(this, arguments) || this;
@@ -234,7 +237,7 @@ var ArrowElite = (function (_super) {
     ArrowElite.prototype.defend = function () { };
     return ArrowElite;
 }(ArrowGuard));
-var ArrowMedic = (function (_super) {
+var ArrowMedic = /** @class */ (function (_super) {
     __extends(ArrowMedic, _super);
     function ArrowMedic() {
         return _super !== null && _super.apply(this, arguments) || this;
@@ -259,7 +262,7 @@ else if (crate.isSupplies()) {
 // Matching guards should be assignable
 a.isFollower = b.isFollower;
 a.isLeader = b.isLeader;
-var MimicGuard = (function () {
+var MimicGuard = /** @class */ (function () {
     function MimicGuard() {
     }
     MimicGuard.prototype.isLeader = function () { return this instanceof MimicLeader; };
@@ -268,7 +271,7 @@ var MimicGuard = (function () {
     ;
     return MimicGuard;
 }());
-var MimicLeader = (function (_super) {
+var MimicLeader = /** @class */ (function (_super) {
     __extends(MimicLeader, _super);
     function MimicLeader() {
         return _super !== null && _super.apply(this, arguments) || this;
@@ -276,7 +279,7 @@ var MimicLeader = (function (_super) {
     MimicLeader.prototype.lead = function () { };
     return MimicLeader;
 }(MimicGuard));
-var MimicFollower = (function (_super) {
+var MimicFollower = /** @class */ (function (_super) {
     __extends(MimicFollower, _super);
     function MimicFollower() {
         return _super !== null && _super.apply(this, arguments) || this;

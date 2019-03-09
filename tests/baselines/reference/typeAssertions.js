@@ -53,9 +53,12 @@ if((numOrStr === undefined) as numOrStr is string) { // Error
 
 //// [typeAssertions.js]
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
@@ -71,19 +74,19 @@ var s;
 // Type assertion of non - unary expression
 var a = "" + 4;
 var s = "" + 4;
-var SomeBase = (function () {
+var SomeBase = /** @class */ (function () {
     function SomeBase() {
     }
     return SomeBase;
 }());
-var SomeDerived = (function (_super) {
+var SomeDerived = /** @class */ (function (_super) {
     __extends(SomeDerived, _super);
     function SomeDerived() {
         return _super !== null && _super.apply(this, arguments) || this;
     }
     return SomeDerived;
 }(SomeBase));
-var SomeOther = (function () {
+var SomeOther = /** @class */ (function () {
     function SomeOther() {
     }
     return SomeOther;
@@ -106,11 +109,11 @@ var numOrStr;
 var str;
 if (is)
     string > (numOrStr === undefined);
-{
+{ // Error
     str = numOrStr; // Error, no narrowing occurred
 }
 if ((numOrStr === undefined))
     is;
 string;
-{
+{ // Error
 }

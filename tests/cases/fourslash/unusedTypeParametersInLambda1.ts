@@ -6,4 +6,7 @@
 ////     [|return <T>(x:number) => {x}|]
 //// }
 
-verify.rangeAfterCodeFix("return (x:number) => {x}");
+verify.codeFix({
+    description: "Remove type parameters",
+    newRangeContent: "return (x:number) => {x}",
+});

@@ -17,16 +17,19 @@ class C extends Base {
 
 //// [computedPropertyNames31_ES5.js]
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
         d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
     };
 })();
-var Base = (function () {
+var Base = /** @class */ (function () {
     function Base() {
     }
     Base.prototype.bar = function () {
@@ -34,7 +37,7 @@ var Base = (function () {
     };
     return Base;
 }());
-var C = (function (_super) {
+var C = /** @class */ (function (_super) {
     __extends(C, _super);
     function C() {
         return _super !== null && _super.apply(this, arguments) || this;
@@ -42,11 +45,11 @@ var C = (function (_super) {
     C.prototype.foo = function () {
         var _this = this;
         (function () {
+            var _a;
             var obj = (_a = {},
                 _a[_super.prototype.bar.call(_this)] = function () { } // needs capture
             ,
                 _a);
-            var _a;
         });
         return 0;
     };

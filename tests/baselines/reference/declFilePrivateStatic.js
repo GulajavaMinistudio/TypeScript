@@ -14,7 +14,7 @@ class C {
 }
 
 //// [declFilePrivateStatic.js]
-var C = (function () {
+var C = /** @class */ (function () {
     function C() {
     }
     C.a = function () { };
@@ -49,7 +49,7 @@ var C = (function () {
 declare class C {
     private static x;
     static y: number;
-    private static a();
+    private static a;
     static b(): void;
     private static readonly c;
     static readonly d: number;

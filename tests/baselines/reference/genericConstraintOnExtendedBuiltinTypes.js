@@ -28,9 +28,12 @@ module EndGate.Tweening {
 
 //// [genericConstraintOnExtendedBuiltinTypes.js]
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
@@ -41,7 +44,7 @@ var EndGate;
 (function (EndGate) {
     var Tweening;
     (function (Tweening) {
-        var Tween = (function () {
+        var Tween = /** @class */ (function () {
             function Tween(from) {
                 this._from = from.Clone();
             }
@@ -53,7 +56,7 @@ var EndGate;
 (function (EndGate) {
     var Tweening;
     (function (Tweening) {
-        var NumberTween = (function (_super) {
+        var NumberTween = /** @class */ (function (_super) {
             __extends(NumberTween, _super);
             function NumberTween(from) {
                 return _super.call(this, from) || this;

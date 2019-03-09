@@ -1,0 +1,114 @@
+=== tests/cases/compiler/mappedTypeRecursiveInference.ts ===
+interface A { a: A }
+>a : A
+
+declare let a: A;
+>a : A
+
+type Deep<T> = { [K in keyof T]: Deep<T[K]> }
+>Deep : Deep<T>
+
+declare function foo<T>(deep: Deep<T>): T;
+>foo : <T>(deep: Deep<T>) => T
+>deep : Deep<T>
+
+const out = foo(a);
+>out : { a: { a: any; }; }
+>foo(a) : { a: { a: any; }; }
+>foo : <T>(deep: Deep<T>) => T
+>a : A
+
+out.a
+>out.a : { a: { a: any; }; }
+>out : { a: { a: any; }; }
+>a : { a: { a: any; }; }
+
+out.a.a
+>out.a.a : { a: { a: any; }; }
+>out.a : { a: { a: any; }; }
+>out : { a: { a: any; }; }
+>a : { a: { a: any; }; }
+>a : { a: { a: any; }; }
+
+out.a.a.a.a.a.a.a
+>out.a.a.a.a.a.a.a : { a: { a: any; }; }
+>out.a.a.a.a.a.a : { a: { a: any; }; }
+>out.a.a.a.a.a : { a: { a: any; }; }
+>out.a.a.a.a : { a: { a: any; }; }
+>out.a.a.a : { a: { a: any; }; }
+>out.a.a : { a: { a: any; }; }
+>out.a : { a: { a: any; }; }
+>out : { a: { a: any; }; }
+>a : { a: { a: any; }; }
+>a : { a: { a: any; }; }
+>a : { a: { a: any; }; }
+>a : { a: { a: any; }; }
+>a : { a: { a: any; }; }
+>a : { a: { a: any; }; }
+>a : { a: { a: any; }; }
+
+
+interface B { [s: string]: B }
+>s : string
+
+declare let b: B;
+>b : B
+
+const oub = foo(b);
+>oub : { [x: string]: any; }
+>foo(b) : { [x: string]: any; }
+>foo : <T>(deep: Deep<T>) => T
+>b : B
+
+oub.b
+>oub.b : { [x: string]: any; }
+>oub : { [x: string]: any; }
+>b : { [x: string]: any; }
+
+oub.b.b
+>oub.b.b : { [x: string]: any; }
+>oub.b : { [x: string]: any; }
+>oub : { [x: string]: any; }
+>b : { [x: string]: any; }
+>b : { [x: string]: any; }
+
+oub.b.a.n.a.n.a
+>oub.b.a.n.a.n.a : { [x: string]: any; }
+>oub.b.a.n.a.n : { [x: string]: any; }
+>oub.b.a.n.a : { [x: string]: any; }
+>oub.b.a.n : { [x: string]: any; }
+>oub.b.a : { [x: string]: any; }
+>oub.b : { [x: string]: any; }
+>oub : { [x: string]: any; }
+>b : { [x: string]: any; }
+>a : { [x: string]: any; }
+>n : { [x: string]: any; }
+>a : { [x: string]: any; }
+>n : { [x: string]: any; }
+>a : { [x: string]: any; }
+
+let xhr: XMLHttpRequest;
+>xhr : XMLHttpRequest
+
+const out2 = foo(xhr);
+>out2 : any
+>foo(xhr) : any
+>foo : <T>(deep: Deep<T>) => T
+>xhr : XMLHttpRequest
+
+out2.responseXML
+>out2.responseXML : any
+>out2 : any
+>responseXML : any
+
+out2.responseXML.activeElement.className.length
+>out2.responseXML.activeElement.className.length : any
+>out2.responseXML.activeElement.className : any
+>out2.responseXML.activeElement : any
+>out2.responseXML : any
+>out2 : any
+>responseXML : any
+>activeElement : any
+>className : any
+>length : any
+

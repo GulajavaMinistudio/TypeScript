@@ -142,9 +142,12 @@ function f6() {
 
 //// [localTypes1.js]
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
@@ -158,7 +161,7 @@ function f1() {
         E[E["B"] = 1] = "B";
         E[E["C"] = 2] = "C";
     })(E || (E = {}));
-    var C = (function () {
+    var C = /** @class */ (function () {
         function C() {
         }
         return C;
@@ -175,7 +178,7 @@ function f2() {
             E[E["B"] = 1] = "B";
             E[E["C"] = 2] = "C";
         })(E || (E = {}));
-        var C = (function () {
+        var C = /** @class */ (function () {
             function C() {
             }
             return C;
@@ -195,7 +198,7 @@ function f3(b) {
             E[E["C"] = 2] = "C";
         })(E || (E = {}));
         if (b) {
-            var C = (function () {
+            var C = /** @class */ (function () {
                 function C() {
                 }
                 return C;
@@ -205,7 +208,7 @@ function f3(b) {
             return a;
         }
         else {
-            var A_1 = (function () {
+            var A_1 = /** @class */ (function () {
                 function A() {
                 }
                 return A;
@@ -224,7 +227,7 @@ function f5() {
             E[E["B"] = 1] = "B";
             E[E["C"] = 2] = "C";
         })(E || (E = {}));
-        var C = (function () {
+        var C = /** @class */ (function () {
             function C() {
             }
             return C;
@@ -238,7 +241,7 @@ function f5() {
             E[E["B"] = 1] = "B";
             E[E["C"] = 2] = "C";
         })(E || (E = {}));
-        var C = (function () {
+        var C = /** @class */ (function () {
             function C() {
             }
             return C;
@@ -246,7 +249,7 @@ function f5() {
         return new C();
     };
 }
-var A = (function () {
+var A = /** @class */ (function () {
     function A() {
         var E;
         (function (E) {
@@ -254,7 +257,7 @@ var A = (function () {
             E[E["B"] = 1] = "B";
             E[E["C"] = 2] = "C";
         })(E || (E = {}));
-        var C = (function () {
+        var C = /** @class */ (function () {
             function C() {
             }
             return C;
@@ -267,7 +270,7 @@ var A = (function () {
             E[E["B"] = 1] = "B";
             E[E["C"] = 2] = "C";
         })(E || (E = {}));
-        var C = (function () {
+        var C = /** @class */ (function () {
             function C() {
             }
             return C;
@@ -282,7 +285,7 @@ var A = (function () {
                 E[E["B"] = 1] = "B";
                 E[E["C"] = 2] = "C";
             })(E || (E = {}));
-            var C = (function () {
+            var C = /** @class */ (function () {
                 function C() {
                 }
                 return C;
@@ -295,13 +298,13 @@ var A = (function () {
     return A;
 }());
 function f6() {
-    var A = (function () {
+    var A = /** @class */ (function () {
         function A() {
         }
         return A;
     }());
     function g() {
-        var B = (function (_super) {
+        var B = /** @class */ (function (_super) {
             __extends(B, _super);
             function B() {
                 return _super !== null && _super.apply(this, arguments) || this;
@@ -309,7 +312,7 @@ function f6() {
             return B;
         }(A));
         function h() {
-            var C = (function (_super) {
+            var C = /** @class */ (function (_super) {
                 __extends(C, _super);
                 function C() {
                     return _super !== null && _super.apply(this, arguments) || this;

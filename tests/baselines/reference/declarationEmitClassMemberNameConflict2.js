@@ -30,7 +30,7 @@ var Hello1;
 (function (Hello1) {
     Hello1[Hello1["World1"] = 0] = "World1";
 })(Hello1 || (Hello1 = {}));
-var Foo = (function () {
+var Foo = /** @class */ (function () {
     function Foo() {
         // Same names + string => OK
         this.Bar = Bar;
@@ -46,10 +46,10 @@ var Foo = (function () {
 //// [declarationEmitClassMemberNameConflict2.d.ts]
 declare const Bar = "bar";
 declare enum Hello {
-    World = 0,
+    World = 0
 }
 declare enum Hello1 {
-    World1 = 0,
+    World1 = 0
 }
 declare class Foo {
     Bar: string;
