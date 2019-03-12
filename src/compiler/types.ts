@@ -1945,9 +1945,9 @@ namespace ts {
         expression?: Expression;
     }
 
-    export interface JsxText extends Node {
+    export interface JsxText extends LiteralLikeNode {
         kind: SyntaxKind.JsxText;
-        containsOnlyWhiteSpaces: boolean;
+        containsOnlyTriviaWhiteSpaces: boolean;
         parent: JsxElement;
     }
 
@@ -3170,6 +3170,7 @@ namespace ts {
          */
         getResolvedSignature(node: CallLikeExpression, candidatesOutArray?: Signature[], argumentCount?: number): Signature | undefined;
         /* @internal */ getResolvedSignatureForSignatureHelp(node: CallLikeExpression, candidatesOutArray?: Signature[], argumentCount?: number): Signature | undefined;
+        /* @internal */ getExpandedParameters(sig: Signature): ReadonlyArray<Symbol>;
         getSignatureFromDeclaration(declaration: SignatureDeclaration): Signature | undefined;
         isImplementationOfOverload(node: SignatureDeclaration): boolean | undefined;
         isUndefinedSymbol(symbol: Symbol): boolean;

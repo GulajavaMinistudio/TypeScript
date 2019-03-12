@@ -231,6 +231,7 @@ namespace ts {
                 getResolvedSignatureWorker(node, candidatesOutArray, agumentCount, CheckMode.Normal),
             getResolvedSignatureForSignatureHelp: (node, candidatesOutArray, agumentCount) =>
                 getResolvedSignatureWorker(node, candidatesOutArray, agumentCount, CheckMode.IsForSignatureHelp),
+            getExpandedParameters,
             getConstantValue: nodeIn => {
                 const node = getParseTreeNode(nodeIn, canHaveConstantValue);
                 return node ? getConstantValue(node) : undefined;
@@ -6778,8 +6779,19 @@ namespace ts {
         }
 
         function cloneSignature(sig: Signature): Signature {
-            return createSignature(sig.declaration, sig.typeParameters, sig.thisParameter, sig.parameters, /*resolvedReturnType*/ undefined,
+            const result = createSignature(sig.declaration, sig.typeParameters, sig.thisParameter, sig.parameters, /*resolvedReturnType*/ undefined,
                 /*resolvedTypePredicate*/ undefined, sig.minArgumentCount, sig.hasRestParameter, sig.hasLiteralTypes);
+            result.target = sig.target;
+            result.mapper = sig.mapper;
+            return result;
+        }
+
+        function createUnionSignature(signature: Signature, unionSignatures: Signature[]) {
+            const result = cloneSignature(signature);
+            result.unionSignatures = unionSignatures;
+            result.target = undefined;
+            result.mapper = undefined;
+            return result;
         }
 
         function getExpandedParameters(sig: Signature): ReadonlyArray<Symbol> {
@@ -6889,9 +6901,8 @@ namespace ts {
                                     const thisType = getUnionType(map(unionSignatures, sig => sig.thisParameter ? getTypeOfSymbol(sig.thisParameter) : anyType), UnionReduction.Subtype);
                                     thisParameter = createSymbolWithType(signature.thisParameter!, thisType);
                                 }
-                                s = cloneSignature(signature);
+                                s = createUnionSignature(signature, unionSignatures);
                                 s.thisParameter = thisParameter;
-                                s.unionSignatures = unionSignatures;
                             }
                             (result || (result = [])).push(s);
                         }
@@ -8399,8 +8410,6 @@ namespace ts {
                 if (returnSignature) {
                     const newReturnSignature = cloneSignature(returnSignature);
                     newReturnSignature.typeParameters = inferredTypeParameters;
-                    newReturnSignature.target = returnSignature.target;
-                    newReturnSignature.mapper = returnSignature.mapper;
                     const newInstantiatedSignature = cloneSignature(instantiatedSignature);
                     newInstantiatedSignature.resolvedReturnType = getOrCreateTypeFromSignature(newReturnSignature);
                     return newInstantiatedSignature;
@@ -11567,7 +11576,7 @@ namespace ts {
                     // child is of the type of the expression
                     return { errorNode: child, innerExpression: child.expression, nameType };
                 case SyntaxKind.JsxText:
-                    if (child.containsOnlyWhiteSpaces) {
+                    if (child.containsOnlyTriviaWhiteSpaces) {
                         break; // Whitespace only jsx text isn't real jsx text
                     }
                     // child is a string
@@ -11591,7 +11600,7 @@ namespace ts {
                 const childrenPropName = childPropName === undefined ? "children" : unescapeLeadingUnderscores(childPropName);
                 const childrenNameType = getLiteralType(childrenPropName);
                 const childrenTargetType = getIndexedAccessType(target, childrenNameType);
-                const validChildren = filter(containingElement.children, i => !isJsxText(i) || !i.containsOnlyWhiteSpaces);
+                const validChildren = filter(containingElement.children, i => !isJsxText(i) || !i.containsOnlyTriviaWhiteSpaces);
                 if (!length(validChildren)) {
                     return result;
                 }
@@ -14662,7 +14671,7 @@ namespace ts {
                     inferFromTypes(getTrueTypeFromConditionalType(<ConditionalType>source), getTrueTypeFromConditionalType(<ConditionalType>target));
                     inferFromTypes(getFalseTypeFromConditionalType(<ConditionalType>source), getFalseTypeFromConditionalType(<ConditionalType>target));
                 }
-                else if (target.flags & TypeFlags.Conditional) {
+                else if (target.flags & TypeFlags.Conditional && !contravariant) {
                     inferFromTypes(source, getTrueTypeFromConditionalType(<ConditionalType>target));
                     inferFromTypes(source, getFalseTypeFromConditionalType(<ConditionalType>target));
                 }
@@ -18345,14 +18354,8 @@ namespace ts {
                     }
                 }
             }
-
             // Result is union of signatures collected (return type is union of return types of this signature set)
-            let result: Signature | undefined;
-            if (signatureList) {
-                result = cloneSignature(signatureList[0]);
-                result.unionSignatures = signatureList;
-            }
-            return result;
+            return signatureList && createUnionSignature(signatureList[0], signatureList);
         }
 
         function checkSpreadExpression(node: SpreadElement, checkMode?: CheckMode): Type {
@@ -18920,7 +18923,7 @@ namespace ts {
                 // In React, JSX text that contains only whitespaces will be ignored so we don't want to type-check that
                 // because then type of children property will have constituent of string type.
                 if (child.kind === SyntaxKind.JsxText) {
-                    if (!child.containsOnlyWhiteSpaces) {
+                    if (!child.containsOnlyTriviaWhiteSpaces) {
                         childrenTypes.push(stringType);
                     }
                 }
@@ -21770,9 +21773,14 @@ namespace ts {
                 return getTypeOfParameter(signature.parameters[pos]);
             }
             if (signature.hasRestParameter) {
+                // We want to return the value undefined for an out of bounds parameter position,
+                // so we need to check bounds here before calling getIndexedAccessType (which
+                // otherwise would return the type 'undefined').
                 const restType = getTypeOfSymbol(signature.parameters[paramCount]);
-                const indexType = getLiteralType(pos - paramCount);
-                return getIndexedAccessType(restType, indexType);
+                const index = pos - paramCount;
+                if (!isTupleType(restType) || restType.target.hasRestElement || index < (restType.typeArguments || emptyArray).length) {
+                    return getIndexedAccessType(restType, getLiteralType(index));
+                }
             }
             return undefined;
         }
