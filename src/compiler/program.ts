@@ -825,11 +825,16 @@ namespace ts {
                 }
                 if (rootNames.length) {
                     for (const parsedRef of resolvedProjectReferences) {
-                        if (parsedRef) {
-                            const out = parsedRef.commandLine.options.outFile || parsedRef.commandLine.options.out;
-                            if (out) {
-                                const dtsOutfile = changeExtension(out, ".d.ts");
-                                processSourceFile(dtsOutfile, /*isDefaultLib*/ false, /*ignoreNoDefaultLib*/ false, /*packageId*/ undefined);
+                        if (!parsedRef) continue;
+                        const out = parsedRef.commandLine.options.outFile || parsedRef.commandLine.options.out;
+                        if (out) {
+                            processSourceFile(changeExtension(out, ".d.ts"), /*isDefaultLib*/ false, /*ignoreNoDefaultLib*/ false, /*packageId*/ undefined);
+                        }
+                        else if (getEmitModuleKind(parsedRef.commandLine.options) === ModuleKind.None) {
+                            for (const fileName of parsedRef.commandLine.fileNames) {
+                                if (!fileExtensionIs(fileName, Extension.Dts) && hasTSFileExtension(fileName)) {
+                                    processSourceFile(getOutputDeclarationFileName(fileName, parsedRef.commandLine, !host.useCaseSensitiveFileNames()), /*isDefaultLib*/ false, /*ignoreNoDefaultLib*/ false, /*packageId*/ undefined);
+                                }
                             }
                         }
                     }
@@ -974,7 +979,7 @@ namespace ts {
 
         function getCommonSourceDirectory() {
             if (commonSourceDirectory === undefined) {
-                const emittedFiles = filter(files, file => sourceFileMayBeEmitted(file, options, isSourceFileFromExternalLibrary));
+                const emittedFiles = filter(files, file => sourceFileMayBeEmitted(file, options, isSourceFileFromExternalLibrary, getResolvedProjectReferenceToRedirect));
                 if (options.rootDir && checkSourceFilesBelongToPath(emittedFiles, options.rootDir)) {
                     // If a rootDir is specified use it as the commonSourceDirectory
                     commonSourceDirectory = getNormalizedAbsolutePath(options.rootDir, currentDirectory);
@@ -1420,6 +1425,7 @@ namespace ts {
                 getSourceFiles: program.getSourceFiles,
                 getLibFileFromReference: program.getLibFileFromReference,
                 isSourceFileFromExternalLibrary,
+                getResolvedProjectReferenceToRedirect,
                 writeFile: writeFileCallback || (
                     (fileName, data, writeByteOrderMark, onError, sourceFiles) => host.writeFile(fileName, data, writeByteOrderMark, onError, sourceFiles)),
                 isEmitBlocked,
@@ -2262,7 +2268,6 @@ namespace ts {
             if (refFile) {
                 const redirect = getProjectReferenceRedirect(fileName);
                 if (redirect) {
-                    ((refFile.redirectedReferences || (refFile.redirectedReferences = [])) as string[]).push(fileName);
                     fileName = redirect;
                     // Once we start redirecting to a file, we can potentially come back to it
                     // via a back-reference from another file in the .d.ts folder. If that happens we'll
@@ -2373,7 +2378,7 @@ namespace ts {
             const out = referencedProject.commandLine.options.outFile || referencedProject.commandLine.options.out;
             return out ?
                 changeExtension(out, Extension.Dts) :
-                getOutputDeclarationFileName(fileName, referencedProject.commandLine);
+                getOutputDeclarationFileName(fileName, referencedProject.commandLine, !host.useCaseSensitiveFileNames());
         }
 
         /**
@@ -2735,13 +2740,14 @@ namespace ts {
 
             // List of collected files is complete; validate exhautiveness if this is a project with a file list
             if (options.composite) {
-                const sourceFiles = files.filter(f => !f.isDeclarationFile);
-                if (rootNames.length < sourceFiles.length) {
-                    const normalizedRootNames = rootNames.map(r => normalizePath(r).toLowerCase());
-                    for (const file of sourceFiles.map(f => normalizePath(f.path).toLowerCase())) {
-                        if (normalizedRootNames.indexOf(file) === -1) {
-                            programDiagnostics.add(createCompilerDiagnostic(Diagnostics.File_0_is_not_in_project_file_list_Projects_must_list_all_files_or_use_an_include_pattern, file));
-                        }
+                const rootPaths = rootNames.map(toPath);
+                for (const file of files) {
+                    // Ignore declaration files
+                    if (file.isDeclarationFile) continue;
+                    // Ignore json file thats from project reference
+                    if (isJsonSourceFile(file) && getResolvedProjectReferenceToRedirect(file.fileName)) continue;
+                    if (rootPaths.indexOf(file.path) === -1) {
+                        programDiagnostics.add(createCompilerDiagnostic(Diagnostics.File_0_is_not_in_project_file_list_Projects_must_list_all_files_or_use_an_include_pattern, file.fileName));
                     }
                 }
             }
@@ -3153,7 +3159,7 @@ namespace ts {
             readFile: f => directoryStructureHost.readFile(f),
             useCaseSensitiveFileNames: host.useCaseSensitiveFileNames(),
             getCurrentDirectory: () => host.getCurrentDirectory(),
-            onUnRecoverableConfigFileDiagnostic: host.onUnRecoverableConfigFileDiagnostic || (() => undefined),
+            onUnRecoverableConfigFileDiagnostic: host.onUnRecoverableConfigFileDiagnostic || returnUndefined,
             trace: host.trace ? (s) => host.trace!(s) : undefined
         };
     }

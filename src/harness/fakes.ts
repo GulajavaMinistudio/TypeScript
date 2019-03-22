@@ -87,7 +87,7 @@ namespace fakes {
         }
 
         public readDirectory(path: string, extensions?: ReadonlyArray<string>, exclude?: ReadonlyArray<string>, include?: ReadonlyArray<string>, depth?: number): string[] {
-            return ts.matchFiles(path, extensions, exclude, include, this.useCaseSensitiveFileNames, this.getCurrentDirectory(), depth, path => this.getAccessibleFileSystemEntries(path));
+            return ts.matchFiles(path, extensions, exclude, include, this.useCaseSensitiveFileNames, this.getCurrentDirectory(), depth, path => this.getAccessibleFileSystemEntries(path), path => this.realpath(path));
         }
 
         public getAccessibleFileSystemEntries(path: string): ts.FileSystemEntries {
@@ -476,7 +476,9 @@ namespace fakes {
         assertDiagnosticMessages(...expectedDiagnostics: ExpectedDiagnostic[]) {
             const actual = this.diagnostics.slice().map(d => d.messageText as string);
             const expected = expectedDiagnostics.map(expectedDiagnosticToText);
-            assert.deepEqual(actual, expected, "Diagnostic arrays did not match");
+            assert.deepEqual(actual, expected, `Diagnostic arrays did not match:
+Actual: ${JSON.stringify(actual, /*replacer*/ undefined, " ")}
+Expected: ${JSON.stringify(expected, /*replacer*/ undefined, " ")}`);
         }
 
         printDiagnostics(header = "== Diagnostics ==") {

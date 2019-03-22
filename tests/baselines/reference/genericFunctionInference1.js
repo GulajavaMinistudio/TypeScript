@@ -58,6 +58,11 @@ declare function pipe5<A, B>(f: (a: A) => B): { f: (a: A) => B };
 
 const f50 = pipe5(list);  // No higher order inference
 
+declare function wrap3<A, B, C>(f: (a: A, b1: B, b2: B) => C): (a: A, b1: B, b2: B) => C;
+declare function baz<T, U extends T>(t1: T, t2: T, u: U): [T, U];
+
+let f60 = wrap3(baz);
+
 // #417
 
 function mirror<A, B>(f: (a: A) => B): (a: A) => B { return f; }
@@ -184,6 +189,19 @@ const fn62 = pipe(
     x => first(x),
 );
 
+// Repro from #30297
+
+declare function foo2<T, U = T>(fn: T, a?: U, b?: U): [T, U];
+
+foo2(() => {});
+foo2(identity);
+foo2(identity, 1);
+
+// Repro from #30324
+
+declare function times<T>(fn: (i: number) => T): (n: number) => T[];
+const a2 = times(identity)(5); // => [0, 1, 2, 3, 4]
+
 
 //// [genericFunctionInference1.js]
 const f00 = pipe(list);
@@ -223,6 +241,7 @@ const f32 = pipe3(list, list);
 const f40 = pipe4([list, box]);
 const f41 = pipe4([box, list]);
 const f50 = pipe5(list); // No higher order inference
+let f60 = wrap3(baz);
 // #417
 function mirror(f) { return f; }
 var identityM = mirror(identity);
@@ -265,3 +284,7 @@ const fn40 = pipe(getString, string => orUndefined(string), identity);
 const fn60 = pipe(getArray, x => x, first);
 const fn61 = pipe(getArray, identity, first);
 const fn62 = pipe(getArray, x => x, x => first(x));
+foo2(() => { });
+foo2(identity);
+foo2(identity, 1);
+const a2 = times(identity)(5); // => [0, 1, 2, 3, 4]
