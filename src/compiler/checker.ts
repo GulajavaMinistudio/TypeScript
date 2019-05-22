@@ -391,7 +391,7 @@ namespace ts {
 
         const tupleTypes = createMap<GenericType>();
         const unionTypes = createMap<UnionType>();
-        const intersectionTypes = createMap<IntersectionType>();
+        const intersectionTypes = createMap<Type>();
         const literalTypes = createMap<LiteralType>();
         const indexedAccessTypes = createMap<IndexedAccessType>();
         const substitutionTypes = createMap<SubstitutionType>();
@@ -5352,7 +5352,7 @@ namespace ts {
                     return type;
                 }
                 else if (declaredType !== errorType && type !== errorType && !isTypeIdenticalTo(declaredType, type)) {
-                    errorNextVariableOrPropertyDeclarationMustHaveSameType(declaredType, declaration, type);
+                    errorNextVariableOrPropertyDeclarationMustHaveSameType(/*firstDeclaration*/ undefined, declaredType, declaration, type);
                 }
             }
             return declaredType;
@@ -9844,6 +9844,15 @@ namespace ts {
             return true;
         }
 
+        function createIntersectionType(types: Type[], aliasSymbol?: Symbol, aliasTypeArguments?: ReadonlyArray<Type>) {
+            const result = <IntersectionType>createType(TypeFlags.Intersection);
+            result.objectFlags = getPropagatingFlagsOfTypes(types, /*excludeKinds*/ TypeFlags.Nullable);
+            result.types = types;
+            result.aliasSymbol = aliasSymbol; // See comment in `getUnionTypeFromSortedList`.
+            result.aliasTypeArguments = aliasTypeArguments;
+            return result;
+        }
+
         // We normalize combinations of intersection and union types based on the distributive property of the '&'
         // operator. Specifically, because X & (A | B) is equivalent to X & A | X & B, we can transform intersection
         // types with union type constituents into equivalent union types with intersection type constituents and
@@ -9881,31 +9890,31 @@ namespace ts {
             if (typeSet.length === 1) {
                 return typeSet[0];
             }
-            if (includes & TypeFlags.Union) {
-                if (intersectUnionsOfPrimitiveTypes(typeSet)) {
-                    // When the intersection creates a reduced set (which might mean that *all* union types have
-                    // disappeared), we restart the operation to get a new set of combined flags. Once we have
-                    // reduced we'll never reduce again, so this occurs at most once.
-                    return getIntersectionType(typeSet, aliasSymbol, aliasTypeArguments);
-                }
-                // We are attempting to construct a type of the form X & (A | B) & Y. Transform this into a type of
-                // the form X & A & Y | X & B & Y and recursively reduce until no union type constituents remain.
-                const unionIndex = findIndex(typeSet, t => (t.flags & TypeFlags.Union) !== 0);
-                const unionType = <UnionType>typeSet[unionIndex];
-                return getUnionType(map(unionType.types, t => getIntersectionType(replaceElement(typeSet, unionIndex, t))),
-                    UnionReduction.Literal, aliasSymbol, aliasTypeArguments);
-            }
             const id = getTypeListId(typeSet);
-            let type = intersectionTypes.get(id);
-            if (!type) {
-                type = <IntersectionType>createType(TypeFlags.Intersection);
-                intersectionTypes.set(id, type);
-                type.objectFlags = getPropagatingFlagsOfTypes(typeSet, /*excludeKinds*/ TypeFlags.Nullable);
-                type.types = typeSet;
-                type.aliasSymbol = aliasSymbol; // See comment in `getUnionTypeFromSortedList`.
-                type.aliasTypeArguments = aliasTypeArguments;
+            let result = intersectionTypes.get(id);
+            if (!result) {
+                if (includes & TypeFlags.Union) {
+                    if (intersectUnionsOfPrimitiveTypes(typeSet)) {
+                        // When the intersection creates a reduced set (which might mean that *all* union types have
+                        // disappeared), we restart the operation to get a new set of combined flags. Once we have
+                        // reduced we'll never reduce again, so this occurs at most once.
+                        result = getIntersectionType(typeSet, aliasSymbol, aliasTypeArguments);
+                    }
+                    else {
+                        // We are attempting to construct a type of the form X & (A | B) & Y. Transform this into a type of
+                        // the form X & A & Y | X & B & Y and recursively reduce until no union type constituents remain.
+                        const unionIndex = findIndex(typeSet, t => (t.flags & TypeFlags.Union) !== 0);
+                        const unionType = <UnionType>typeSet[unionIndex];
+                        result = getUnionType(map(unionType.types, t => getIntersectionType(replaceElement(typeSet, unionIndex, t))),
+                            UnionReduction.Literal, aliasSymbol, aliasTypeArguments);
+                    }
+                }
+                else {
+                    result = createIntersectionType(typeSet, aliasSymbol, aliasTypeArguments);
+                }
+                intersectionTypes.set(id, result);
             }
-            return type;
+            return result;
         }
 
         function getTypeFromIntersectionTypeNode(node: IntersectionTypeNode): Type {
@@ -26830,7 +26839,7 @@ namespace ts {
                 if (type !== errorType && declarationType !== errorType &&
                     !isTypeIdenticalTo(type, declarationType) &&
                     !(symbol.flags & SymbolFlags.Assignment)) {
-                    errorNextVariableOrPropertyDeclarationMustHaveSameType(type, node, declarationType);
+                    errorNextVariableOrPropertyDeclarationMustHaveSameType(symbol.valueDeclaration, type, node, declarationType);
                 }
                 if (node.initializer) {
                     checkTypeAssignableToAndOptionallyElaborate(checkExpressionCached(node.initializer), declarationType, node, node.initializer, /*headMessage*/ undefined);
@@ -26850,17 +26859,24 @@ namespace ts {
             }
         }
 
-        function errorNextVariableOrPropertyDeclarationMustHaveSameType(firstType: Type, nextDeclaration: Declaration, nextType: Type): void {
+        function errorNextVariableOrPropertyDeclarationMustHaveSameType(firstDeclaration: Declaration | undefined, firstType: Type, nextDeclaration: Declaration, nextType: Type): void {
             const nextDeclarationName = getNameOfDeclaration(nextDeclaration);
             const message = nextDeclaration.kind === SyntaxKind.PropertyDeclaration || nextDeclaration.kind === SyntaxKind.PropertySignature
                 ? Diagnostics.Subsequent_property_declarations_must_have_the_same_type_Property_0_must_be_of_type_1_but_here_has_type_2
                 : Diagnostics.Subsequent_variable_declarations_must_have_the_same_type_Variable_0_must_be_of_type_1_but_here_has_type_2;
-            error(
+            const declName = declarationNameToString(nextDeclarationName);
+            const err = error(
                 nextDeclarationName,
                 message,
-                declarationNameToString(nextDeclarationName),
+                declName,
                 typeToString(firstType),
-                typeToString(nextType));
+                typeToString(nextType)
+            );
+            if (firstDeclaration) {
+                addRelatedInfo(err,
+                    createDiagnosticForNode(firstDeclaration, Diagnostics._0_was_also_declared_here, declName)
+                );
+            }
         }
 
         function areDeclarationFlagsIdentical(left: Declaration, right: Declaration) {
