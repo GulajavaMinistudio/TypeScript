@@ -7316,7 +7316,8 @@ namespace ts {
                         stringIndexInfo = createIndexInfo(anyType, /*isReadonly*/ false);
                     }
                 }
-                const numberIndexInfo = symbol.flags & SymbolFlags.Enum ? enumNumberIndexInfo : undefined;
+                const numberIndexInfo = symbol.flags & SymbolFlags.Enum && (getDeclaredTypeOfSymbol(symbol).flags & TypeFlags.Enum ||
+                    some(type.properties, prop => !!(getTypeOfSymbol(prop).flags & TypeFlags.NumberLike))) ? enumNumberIndexInfo : undefined;
                 setStructuredTypeMembers(type, members, emptyArray, emptyArray, stringIndexInfo, numberIndexInfo);
                 // We resolve the members before computing the signatures because a signature may use
                 // typeof with a qualified name expression that circularly references the type we are
@@ -8016,9 +8017,12 @@ namespace ts {
                     else if (isUnion) {
                         const indexInfo = !isLateBoundName(name) && (isNumericLiteralName(name) && getIndexInfoOfType(type, IndexKind.Number) || getIndexInfoOfType(type, IndexKind.String));
                         if (indexInfo) {
-                            checkFlags |= indexInfo.isReadonly ? CheckFlags.Readonly : 0;
-                            checkFlags |= CheckFlags.WritePartial;
+                            checkFlags |= CheckFlags.WritePartial | (indexInfo.isReadonly ? CheckFlags.Readonly : 0);
                             indexTypes = append(indexTypes, isTupleType(type) ? getRestTypeOfTupleType(type) || undefinedType : indexInfo.type);
+                        }
+                        else if (isObjectLiteralType(type)) {
+                            checkFlags |= CheckFlags.WritePartial;
+                            indexTypes = append(indexTypes, undefinedType);
                         }
                         else {
                             checkFlags |= CheckFlags.ReadPartial;
@@ -8190,6 +8194,9 @@ namespace ts {
                     if (kind === IndexKind.String || isNumericLiteralName(prop.escapedName)) {
                         propTypes.push(getTypeOfSymbol(prop));
                     }
+                }
+                if (kind === IndexKind.String) {
+                    append(propTypes, getIndexTypeOfType(type, IndexKind.Number));
                 }
                 if (propTypes.length) {
                     return getUnionType(propTypes, UnionReduction.Subtype);
@@ -14612,7 +14619,7 @@ namespace ts {
          * with no call or construct signatures.
          */
         function isObjectTypeWithInferableIndex(type: Type) {
-            return type.symbol && (type.symbol.flags & (SymbolFlags.ObjectLiteral | SymbolFlags.TypeLiteral | SymbolFlags.ValueModule)) !== 0 &&
+            return type.symbol && (type.symbol.flags & (SymbolFlags.ObjectLiteral | SymbolFlags.TypeLiteral | SymbolFlags.Enum | SymbolFlags.ValueModule)) !== 0 &&
                 !typeHasCallOrConstructSignatures(type);
         }
 
@@ -18451,11 +18458,13 @@ namespace ts {
                     }
                     return contextSensitive === true ? getTypeOfExpression(left) : contextSensitive;
                 case SyntaxKind.BarBarToken:
-                    // When an || expression has a contextual type, the operands are contextually typed by that type. When an ||
-                    // expression has no contextual type, the right operand is contextually typed by the type of the left operand,
-                    // except for the special case of Javascript declarations of the form `namespace.prop = namespace.prop || {}`
+                    // When an || expression has a contextual type, the operands are contextually typed by that type, except
+                    // when that type originates in a binding pattern, the right operand is contextually typed by the type of
+                    // the left operand. When an || expression has no contextual type, the right operand is contextually typed
+                    // by the type of the left operand, except for the special case of Javascript declarations of the form
+                    // `namespace.prop = namespace.prop || {}`.
                     const type = getContextualType(binaryExpression, contextFlags);
-                    return !type && node === right && !isDefaultedExpandoInitializer(binaryExpression) ?
+                    return node === right && (type && type.pattern || !type && !isDefaultedExpandoInitializer(binaryExpression)) ?
                         getTypeOfExpression(left) : type;
                 case SyntaxKind.AmpersandAmpersandToken:
                 case SyntaxKind.CommaToken:
@@ -20195,7 +20204,8 @@ namespace ts {
             let propType: Type;
             const leftType = checkNonNullExpression(left);
             const parentSymbol = getNodeLinks(left).resolvedSymbol;
-            const apparentType = getApparentType(getWidenedType(leftType));
+            // We widen array literals to get type any[] instead of undefined[] in non-strict mode
+            const apparentType = getApparentType(isEmptyArrayLiteralType(leftType) ? getWidenedType(leftType) : leftType);
             if (isTypeAny(apparentType) || apparentType === silentNeverType) {
                 if (isIdentifier(left) && parentSymbol) {
                     markAliasReferenced(parentSymbol, node);
