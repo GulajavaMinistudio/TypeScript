@@ -28,33 +28,30 @@ async function main() {
 
     // Forcibly cleanup workspace
     runSequence([
-        ["git", ["clean", "-fdx"]],
         ["git", ["checkout", "."]],
+        ["git", ["fetch", "-fu", "origin", "master:master"]],
         ["git", ["checkout", "master"]],
         ["git", ["remote", "add", "fork", remoteUrl]], // Add the remote fork
-        ["git", ["fetch", "origin", "master:master"]],
     ]);
 
-    const gh = new Octokit();
-    gh.authenticate({
-        type: "token",
-        token: process.argv[2]
+    const gh = new Octokit({
+        auth: process.argv[2]
     });
     for (const numRaw of prnums) {
         const num = +numRaw;
         if (num) {
             // PR number rather than branch name - lookup info
-            const inputPR = await gh.pulls.get({ owner: "Microsoft", repo: "TypeScript", number: num });
+            const inputPR = await gh.pulls.get({ owner: "Microsoft", repo: "TypeScript", pull_number: num });
             // GH calculates the rebaseable-ness of a PR into its target, so we can just use that here
             if (!inputPR.data.rebaseable) {
                 if (+triggeredPR === num) {
                     await gh.issues.createComment({
                         owner: "Microsoft",
                         repo: "TypeScript",
-                        number: num,
-                        body: `This PR is configured as an experiment, and currently has merge conflicts with master - please rebase onto master and fix the conflicts.`
+                        issue_number: num,
+                        body: `This PR is configured as an experiment, and currently has rebase conflicts with master - please rebase onto master and fix the conflicts.`
                     });
-                    throw new Error(`Merge conflict detected in PR ${num} with master`);
+                    throw new Error(`Rebase conflict detected in PR ${num} with master`);
                 }
                 return; // A PR is currently in conflict, give up
             }
@@ -74,7 +71,6 @@ async function main() {
     // Return to `master` and make a new `experimental` branch
     runSequence([
         ["git", ["checkout", "master"]],
-        ["git", ["branch", "-D", "experimental"]],
         ["git", ["checkout", "-b", "experimental"]],
     ]);
 
@@ -88,7 +84,7 @@ async function main() {
         const mergeTree = runSequence([
             ["git", ["merge-tree", mergeBase.trim(), branch, "experimental"]]
         ]);
-        if (mergeTree.indexOf(`===${"="}===`)) { // 7 equals is the center of the merge conflict marker
+        if (mergeTree.indexOf(`===${"="}===`) >= 0) { // 7 equals is the center of the merge conflict marker
             throw new Error(`Merge conflict detected involving PR ${branch} with other experiment`);
         }
         // Merge (always producing a merge commit)

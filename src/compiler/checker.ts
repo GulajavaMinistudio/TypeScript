@@ -5231,7 +5231,7 @@ namespace ts {
                     }
                 }
                 // Use contextual parameter type if one is available
-                const type = declaration.symbol.escapedName === InternalSymbolName.This ? getContextualThisParameterType(func) : getContextuallyTypedParameterType(declaration);
+                const type = declaration.symbol.escapedName === InternalSymbolName.This ? getContextualThisParameterType(func) : getContextuallyTypedParameterType(declaration, /*forCache*/ true);
                 if (type) {
                     return addOptionality(type, isOptional);
                 }
@@ -6444,7 +6444,8 @@ namespace ts {
                 for (const declaration of symbol.declarations) {
                     if (declaration.kind === SyntaxKind.EnumDeclaration) {
                         for (const member of (<EnumDeclaration>declaration).members) {
-                            const memberType = getFreshTypeOfLiteralType(getLiteralType(getEnumMemberValue(member)!, enumCount, getSymbolOfNode(member))); // TODO: GH#18217
+                            const value = getEnumMemberValue(member);
+                            const memberType = getFreshTypeOfLiteralType(getLiteralType(value !== undefined ? value : 0, enumCount, getSymbolOfNode(member)));
                             getSymbolLinks(getSymbolOfNode(member)).declaredType = memberType;
                             memberTypeList.push(getRegularTypeOfLiteralType(memberType));
                         }
@@ -7453,8 +7454,9 @@ namespace ts {
                 else if (t.flags & (TypeFlags.Any | TypeFlags.String)) {
                     stringIndexInfo = createIndexInfo(propType, !!(templateModifiers & MappedTypeModifiers.IncludeReadonly));
                 }
-                else if (t.flags & TypeFlags.Number) {
-                    numberIndexInfo = createIndexInfo(propType, !!(templateModifiers & MappedTypeModifiers.IncludeReadonly));
+                else if (t.flags & (TypeFlags.Number | TypeFlags.Enum)) {
+                    numberIndexInfo = createIndexInfo(numberIndexInfo ? getUnionType([numberIndexInfo.type, propType]) : propType,
+                        !!(templateModifiers & MappedTypeModifiers.IncludeReadonly));
                 }
             }
         }
@@ -11522,6 +11524,7 @@ namespace ts {
                 case SyntaxKind.FunctionExpression:
                 case SyntaxKind.ArrowFunction:
                 case SyntaxKind.MethodDeclaration:
+                case SyntaxKind.FunctionDeclaration: // Function declarations can have context when annotated with a jsdoc @type
                     return isContextSensitiveFunctionLikeDeclaration(<FunctionExpression | ArrowFunction | MethodDeclaration>node);
                 case SyntaxKind.ObjectLiteralExpression:
                     return some((<ObjectLiteralExpression>node).properties, isContextSensitive);
@@ -11555,6 +11558,9 @@ namespace ts {
         }
 
         function isContextSensitiveFunctionLikeDeclaration(node: FunctionLikeDeclaration): boolean {
+            if (isFunctionDeclaration(node) && (!isInJSFile(node) || !getTypeForDeclarationFromJSDocComment(node))) {
+                return false;
+            }
             // Functions with type parameters are not context sensitive.
             if (node.typeParameters) {
                 return false;
@@ -18264,7 +18270,7 @@ namespace ts {
         }
 
         // Return contextual type of parameter or undefined if no contextual type is available
-        function getContextuallyTypedParameterType(parameter: ParameterDeclaration): Type | undefined {
+        function getContextuallyTypedParameterType(parameter: ParameterDeclaration, forCache: boolean): Type | undefined {
             const func = parameter.parent;
             if (!isContextSensitiveFunctionOrObjectLiteralMethod(func)) {
                 return undefined;
@@ -18285,8 +18291,21 @@ namespace ts {
                 links.resolvedSignature = cached;
                 return type;
             }
-            const contextualSignature = getContextualSignature(func);
+            let contextualSignature = getContextualSignature(func);
             if (contextualSignature) {
+                if (forCache) {
+                    // Calling the below guarantees the types are primed and assigned in the same way
+                    // as when the parameter is reached via `checkFunctionExpressionOrObjectLiteralMethod`.
+                    // This should prevent any uninstantiated inference variables in the contextual signature
+                    // from leaking, and should lock in cached parameter types via `assignContextualParameterTypes`
+                    // which we will then immediately use the results of below.
+                    contextuallyCheckFunctionExpressionOrObjectLiteralMethod(func);
+                    const type = getTypeOfSymbol(getMergedSymbol(func.symbol));
+                    if (isTypeAny(type)) {
+                        return type;
+                    }
+                    contextualSignature = getSignaturesOfType(type, SignatureKind.Call)[0];
+                }
                 const index = func.parameters.indexOf(parameter) - (getThisParameter(func) ? 1 : 0);
                 return parameter.dotDotDotToken && lastOrUndefined(func.parameters) === parameter ?
                     getRestTypeAtPosition(contextualSignature, index) :
@@ -18301,7 +18320,7 @@ namespace ts {
             }
             switch (declaration.kind) {
                 case SyntaxKind.Parameter:
-                    return getContextuallyTypedParameterType(declaration);
+                    return getContextuallyTypedParameterType(declaration, /*forCache*/ false);
                 case SyntaxKind.BindingElement:
                     return getContextualTypeForBindingElement(declaration);
                 // By default, do nothing and return undefined - only parameters and binding elements have context implied by a parent
@@ -20200,19 +20219,25 @@ namespace ts {
             return checkPropertyAccessExpressionOrQualifiedName(node, node.left, node.right);
         }
 
+        function isMethodAccessForCall(node: Node) {
+            while (node.parent.kind === SyntaxKind.ParenthesizedExpression) {
+                node = node.parent;
+            }
+            return isCallOrNewExpression(node.parent) && node.parent.expression === node;
+        }
+
         function checkPropertyAccessExpressionOrQualifiedName(node: PropertyAccessExpression | QualifiedName, left: Expression | QualifiedName, right: Identifier) {
             let propType: Type;
             const leftType = checkNonNullExpression(left);
             const parentSymbol = getNodeLinks(left).resolvedSymbol;
-            // We widen array literals to get type any[] instead of undefined[] in non-strict mode
-            const apparentType = getApparentType(isEmptyArrayLiteralType(leftType) ? getWidenedType(leftType) : leftType);
+            const assignmentKind = getAssignmentTargetKind(node);
+            const apparentType = getApparentType(assignmentKind !== AssignmentKind.None || isMethodAccessForCall(node) ? getWidenedType(leftType) : leftType);
             if (isTypeAny(apparentType) || apparentType === silentNeverType) {
                 if (isIdentifier(left) && parentSymbol) {
                     markAliasReferenced(parentSymbol, node);
                 }
                 return apparentType;
             }
-            const assignmentKind = getAssignmentTargetKind(node);
             const prop = getPropertyOfType(apparentType, right.escapedText);
             if (isIdentifier(left) && parentSymbol && !(prop && isConstEnumOrConstEnumOnlyModule(prop))) {
                 markAliasReferenced(parentSymbol, node);
@@ -20606,7 +20631,8 @@ namespace ts {
         }
 
         function checkIndexedAccess(node: ElementAccessExpression): Type {
-            const objectType = checkNonNullExpression(node.expression);
+            const exprType = checkNonNullExpression(node.expression);
+            const objectType = getAssignmentTargetKind(node) !== AssignmentKind.None || isMethodAccessForCall(node) ? getWidenedType(exprType) : exprType;
 
             const indexExpression = node.argumentExpression;
             if (!indexExpression) {
@@ -23079,12 +23105,18 @@ namespace ts {
                 checkGrammarForGenerator(node);
             }
 
-            const links = getNodeLinks(node);
             const type = getTypeOfSymbol(getMergedSymbol(node.symbol));
             if (isTypeAny(type)) {
                 return type;
             }
 
+            contextuallyCheckFunctionExpressionOrObjectLiteralMethod(node, checkMode);
+
+            return type;
+        }
+
+        function contextuallyCheckFunctionExpressionOrObjectLiteralMethod(node: FunctionExpression | ArrowFunction | MethodDeclaration, checkMode?: CheckMode) {
+            const links = getNodeLinks(node);
             // Check if function expression is contextually typed and assign parameter types if so.
             if (!(links.flags & NodeCheckFlags.ContextChecked)) {
                 const contextualSignature = getContextualSignature(node);
@@ -23094,6 +23126,10 @@ namespace ts {
                 if (!(links.flags & NodeCheckFlags.ContextChecked)) {
                     links.flags |= NodeCheckFlags.ContextChecked;
                     if (contextualSignature) {
+                        const type = getTypeOfSymbol(getMergedSymbol(node.symbol));
+                        if (isTypeAny(type)) {
+                            return;
+                        }
                         const signature = getSignaturesOfType(type, SignatureKind.Call)[0];
                         if (isContextSensitive(node)) {
                             const inferenceContext = getInferenceContext(node);
@@ -23114,8 +23150,6 @@ namespace ts {
                     checkSignatureDeclaration(node);
                 }
             }
-
-            return type;
         }
 
         function getReturnOrPromisedType(node: FunctionLikeDeclaration | MethodSignature, functionFlags: FunctionFlags) {
@@ -28440,9 +28474,9 @@ namespace ts {
             if (member.initializer) {
                 return computeConstantValue(member);
             }
-            // In ambient enum declarations that specify no const modifier, enum member declarations that omit
-            // a value are considered computed members (as opposed to having auto-incremented values).
-            if (member.parent.flags & NodeFlags.Ambient && !isEnumConst(member.parent)) {
+            // In ambient non-const numeric enum declarations, enum members without initializers are
+            // considered computed members (as opposed to having auto-incremented values).
+            if (member.parent.flags & NodeFlags.Ambient && !isEnumConst(member.parent) && getEnumKind(getSymbolOfNode(member.parent)) === EnumKind.Numeric) {
                 return undefined;
             }
             // If the member declaration specifies no value, the member is considered a constant enum member.
