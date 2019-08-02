@@ -344,7 +344,8 @@ namespace FourSlash {
                     "getDocumentHighlights",
                 ];
                 const proxy = {} as ts.LanguageService;
-                for (const k in ls) {
+                const keys = ts.getAllKeys(ls);
+                for (const k of keys) {
                     const key = k as keyof typeof ls;
                     if (cacheableMembers.indexOf(key) === -1) {
                         proxy[key] = (...args: any[]) => (ls[key] as Function)(...args);
@@ -2430,7 +2431,7 @@ namespace FourSlash {
                     const oldText = this.tryGetFileContent(change.fileName);
                     ts.Debug.assert(!!change.isNewFile === (oldText === undefined));
                     const newContent = change.isNewFile ? ts.first(change.textChanges).newText : ts.textChanges.applyChanges(oldText!, change.textChanges);
-                    assert.equal(newContent, expectedNewContent);
+                    assert.equal(newContent, expectedNewContent, `String mis-matched in file ${change.fileName}`);
                 }
                 for (const newFileName in newFileContent) {
                     ts.Debug.assert(changes.some(c => c.fileName === newFileName), "No change in file", () => newFileName);

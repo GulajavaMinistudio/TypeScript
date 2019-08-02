@@ -5037,8 +5037,10 @@ namespace ts {
             return Debug.assertNever(propertyName);
         }
 
-        // Pop an entry from the type resolution stack and return its associated result value. The result value will
-        // be true if no circularities were detected, or false if a circularity was found.
+        /**
+         * Pop an entry from the type resolution stack and return its associated result value. The result value will
+         * be true if no circularities were detected, or false if a circularity was found.
+         */
         function popTypeResolution(): boolean {
             resolutionTargets.pop();
             resolutionPropertyNames.pop();
@@ -11402,7 +11404,8 @@ namespace ts {
 
         function maybeTypeParameterReference(node: Node) {
             return !(node.kind === SyntaxKind.QualifiedName ||
-                node.parent.kind === SyntaxKind.TypeReference && (<TypeReferenceNode>node.parent).typeArguments && node === (<TypeReferenceNode>node.parent).typeName);
+                node.parent.kind === SyntaxKind.TypeReference && (<TypeReferenceNode>node.parent).typeArguments && node === (<TypeReferenceNode>node.parent).typeName ||
+                node.parent.kind === SyntaxKind.ImportType && (node.parent as ImportTypeNode).typeArguments && node === (node.parent as ImportTypeNode).qualifier);
         }
 
         function isTypeParameterPossiblyReferenced(tp: TypeParameter, node: Node) {
@@ -20697,7 +20700,7 @@ namespace ts {
 
         function checkPropertyNotUsedBeforeDeclaration(prop: Symbol, node: PropertyAccessExpression | QualifiedName, right: Identifier): void {
             const { valueDeclaration } = prop;
-            if (!valueDeclaration) {
+            if (!valueDeclaration || getSourceFileOfNode(node).isDeclarationFile) {
                 return;
             }
 
@@ -29326,7 +29329,7 @@ namespace ts {
 
             // NOTE: assignability is checked in checkClassDeclaration
             const baseProperties = getPropertiesOfType(baseType);
-            for (const baseProperty of baseProperties) {
+            basePropertyCheck: for (const baseProperty of baseProperties) {
                 const base = getTargetSymbol(baseProperty);
 
                 if (base.flags & SymbolFlags.Prototype) {
@@ -29338,60 +29341,70 @@ namespace ts {
 
                 Debug.assert(!!derived, "derived should point to something, even if it is the base class' declaration.");
 
-                if (derived) {
-                    // In order to resolve whether the inherited method was overridden in the base class or not,
-                    // we compare the Symbols obtained. Since getTargetSymbol returns the symbol on the *uninstantiated*
-                    // type declaration, derived and base resolve to the same symbol even in the case of generic classes.
-                    if (derived === base) {
-                        // derived class inherits base without override/redeclaration
+                // In order to resolve whether the inherited method was overridden in the base class or not,
+                // we compare the Symbols obtained. Since getTargetSymbol returns the symbol on the *uninstantiated*
+                // type declaration, derived and base resolve to the same symbol even in the case of generic classes.
+                if (derived === base) {
+                    // derived class inherits base without override/redeclaration
 
-                        const derivedClassDecl = getClassLikeDeclarationOfSymbol(type.symbol)!;
+                    const derivedClassDecl = getClassLikeDeclarationOfSymbol(type.symbol)!;
 
-                        // It is an error to inherit an abstract member without implementing it or being declared abstract.
-                        // If there is no declaration for the derived class (as in the case of class expressions),
-                        // then the class cannot be declared abstract.
-                        if (baseDeclarationFlags & ModifierFlags.Abstract && (!derivedClassDecl || !hasModifier(derivedClassDecl, ModifierFlags.Abstract))) {
-                            if (derivedClassDecl.kind === SyntaxKind.ClassExpression) {
-                                error(derivedClassDecl, Diagnostics.Non_abstract_class_expression_does_not_implement_inherited_abstract_member_0_from_class_1,
-                                    symbolToString(baseProperty), typeToString(baseType));
-                            }
-                            else {
-                                error(derivedClassDecl, Diagnostics.Non_abstract_class_0_does_not_implement_inherited_abstract_member_1_from_class_2,
-                                    typeToString(type), symbolToString(baseProperty), typeToString(baseType));
-                            }
-                        }
-                    }
-                    else {
-                        // derived overrides base.
-                        const derivedDeclarationFlags = getDeclarationModifierFlagsFromSymbol(derived);
-                        if (baseDeclarationFlags & ModifierFlags.Private || derivedDeclarationFlags & ModifierFlags.Private) {
-                            // either base or derived property is private - not override, skip it
-                            continue;
-                        }
-
-                        if (isPrototypeProperty(base) || base.flags & SymbolFlags.PropertyOrAccessor && derived.flags & SymbolFlags.PropertyOrAccessor) {
-                            // method is overridden with method or property/accessor is overridden with property/accessor - correct case
-                            continue;
-                        }
-
-                        let errorMessage: DiagnosticMessage;
-                        if (isPrototypeProperty(base)) {
-                            if (derived.flags & SymbolFlags.Accessor) {
-                                errorMessage = Diagnostics.Class_0_defines_instance_member_function_1_but_extended_class_2_defines_it_as_instance_member_accessor;
-                            }
-                            else {
-                                errorMessage = Diagnostics.Class_0_defines_instance_member_function_1_but_extended_class_2_defines_it_as_instance_member_property;
+                    // It is an error to inherit an abstract member without implementing it or being declared abstract.
+                    // If there is no declaration for the derived class (as in the case of class expressions),
+                    // then the class cannot be declared abstract.
+                    if (baseDeclarationFlags & ModifierFlags.Abstract && (!derivedClassDecl || !hasModifier(derivedClassDecl, ModifierFlags.Abstract))) {
+                        // Searches other base types for a declaration that would satisfy the inherited abstract member.
+                        // (The class may have more than one base type via declaration merging with an interface with the
+                        // same name.)
+                        for (const otherBaseType of getBaseTypes(type)) {
+                            if (otherBaseType === baseType) continue;
+                            const baseSymbol = getPropertyOfObjectType(otherBaseType, base.escapedName);
+                            const derivedElsewhere = baseSymbol && getTargetSymbol(baseSymbol);
+                            if (derivedElsewhere && derivedElsewhere !== base) {
+                                continue basePropertyCheck;
                             }
                         }
-                        else if (base.flags & SymbolFlags.Accessor) {
-                            errorMessage = Diagnostics.Class_0_defines_instance_member_accessor_1_but_extended_class_2_defines_it_as_instance_member_function;
+
+                        if (derivedClassDecl.kind === SyntaxKind.ClassExpression) {
+                            error(derivedClassDecl, Diagnostics.Non_abstract_class_expression_does_not_implement_inherited_abstract_member_0_from_class_1,
+                                symbolToString(baseProperty), typeToString(baseType));
                         }
                         else {
-                            errorMessage = Diagnostics.Class_0_defines_instance_member_property_1_but_extended_class_2_defines_it_as_instance_member_function;
+                            error(derivedClassDecl, Diagnostics.Non_abstract_class_0_does_not_implement_inherited_abstract_member_1_from_class_2,
+                                typeToString(type), symbolToString(baseProperty), typeToString(baseType));
                         }
-
-                        error(getNameOfDeclaration(derived.valueDeclaration) || derived.valueDeclaration, errorMessage, typeToString(baseType), symbolToString(base), typeToString(type));
                     }
+                }
+                else {
+                    // derived overrides base.
+                    const derivedDeclarationFlags = getDeclarationModifierFlagsFromSymbol(derived);
+                    if (baseDeclarationFlags & ModifierFlags.Private || derivedDeclarationFlags & ModifierFlags.Private) {
+                        // either base or derived property is private - not override, skip it
+                        continue;
+                    }
+
+                    if (isPrototypeProperty(base) || base.flags & SymbolFlags.PropertyOrAccessor && derived.flags & SymbolFlags.PropertyOrAccessor) {
+                        // method is overridden with method or property/accessor is overridden with property/accessor - correct case
+                        continue;
+                    }
+
+                    let errorMessage: DiagnosticMessage;
+                    if (isPrototypeProperty(base)) {
+                        if (derived.flags & SymbolFlags.Accessor) {
+                            errorMessage = Diagnostics.Class_0_defines_instance_member_function_1_but_extended_class_2_defines_it_as_instance_member_accessor;
+                        }
+                        else {
+                            errorMessage = Diagnostics.Class_0_defines_instance_member_function_1_but_extended_class_2_defines_it_as_instance_member_property;
+                        }
+                    }
+                    else if (base.flags & SymbolFlags.Accessor) {
+                        errorMessage = Diagnostics.Class_0_defines_instance_member_accessor_1_but_extended_class_2_defines_it_as_instance_member_function;
+                    }
+                    else {
+                        errorMessage = Diagnostics.Class_0_defines_instance_member_property_1_but_extended_class_2_defines_it_as_instance_member_function;
+                    }
+
+                    error(getNameOfDeclaration(derived.valueDeclaration) || derived.valueDeclaration, errorMessage, typeToString(baseType), symbolToString(base), typeToString(type));
                 }
             }
         }
@@ -29973,8 +29986,10 @@ namespace ts {
         function checkAliasSymbol(node: ImportEqualsDeclaration | ImportClause | NamespaceImport | ImportSpecifier | ExportSpecifier) {
             const symbol = getSymbolOfNode(node);
             const target = resolveAlias(symbol);
-            if (target !== unknownSymbol) {
-                // For external modules symbol represent local symbol for an alias.
+
+            const shouldSkipWithJSExpandoTargets = symbol.flags & SymbolFlags.Assignment;
+            if (!shouldSkipWithJSExpandoTargets && target !== unknownSymbol) {
+                // For external modules symbol represents local symbol for an alias.
                 // This local symbol will merge any other local declarations (excluding other aliases)
                 // and symbol.flags will contains combined representation for all merged declaration.
                 // Based on symbol.flags we can compute a set of excluded meanings (meaning that resolved alias should not have,
