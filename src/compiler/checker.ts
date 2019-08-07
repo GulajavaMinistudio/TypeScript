@@ -585,7 +585,7 @@ namespace ts {
                     checkSourceFile(file);
                     Debug.assert(!!(getNodeLinks(file).flags & NodeCheckFlags.TypeChecked));
 
-                    diagnostics = addRange(diagnostics, suggestionDiagnostics.get(file.fileName));
+                    diagnostics = addRange(diagnostics, suggestionDiagnostics.getDiagnostics(file.fileName));
                     if (!file.isDeclarationFile && (!unusedIsError(UnusedKind.Local) || !unusedIsError(UnusedKind.Parameter))) {
                         addUnusedDiagnostics();
                     }
@@ -848,8 +848,7 @@ namespace ts {
         const awaitedTypeStack: number[] = [];
 
         const diagnostics = createDiagnosticCollection();
-        // Suggestion diagnostics must have a file. Keyed by source file name.
-        const suggestionDiagnostics = createMultiMap<DiagnosticWithLocation>();
+        const suggestionDiagnostics = createDiagnosticCollection();
 
         const typeofTypesByName: ReadonlyMap<Type> = createMapFromTemplate<Type>({
             string: stringType,
@@ -944,7 +943,7 @@ namespace ts {
                 diagnostics.add(diagnostic);
             }
             else {
-                suggestionDiagnostics.add(diagnostic.file.fileName, { ...diagnostic, category: DiagnosticCategory.Suggestion });
+                suggestionDiagnostics.add({ ...diagnostic, category: DiagnosticCategory.Suggestion });
             }
         }
         function errorOrSuggestion(isError: boolean, location: Node, message: DiagnosticMessage | DiagnosticMessageChain, arg0?: string | number, arg1?: string | number, arg2?: string | number, arg3?: string | number): void {
@@ -2380,7 +2379,7 @@ namespace ts {
             return links.target;
         }
 
-        function markExportAsReferenced(node: ImportEqualsDeclaration | ExportAssignment | ExportSpecifier) {
+        function markExportAsReferenced(node: ImportEqualsDeclaration | ExportSpecifier) {
             const symbol = getSymbolOfNode(node);
             const target = resolveAlias(symbol);
             if (target) {
@@ -2402,17 +2401,15 @@ namespace ts {
                 links.referenced = true;
                 const node = getDeclarationOfAliasSymbol(symbol);
                 if (!node) return Debug.fail();
-                if (node.kind === SyntaxKind.ExportAssignment) {
-                    // export default <symbol>
-                    checkExpressionCached((<ExportAssignment>node).expression);
-                }
-                else if (node.kind === SyntaxKind.ExportSpecifier) {
-                    // export { <symbol> } or export { <symbol> as foo }
-                    checkExpressionCached((<ExportSpecifier>node).propertyName || (<ExportSpecifier>node).name);
-                }
-                else if (isInternalModuleImportEqualsDeclaration(node)) {
-                    // import foo = <symbol>
-                    checkExpressionCached(<Expression>node.moduleReference);
+                // We defer checking of the reference of an `import =` until the import itself is referenced,
+                // This way a chain of imports can be elided if ultimately the final input is only used in a type
+                // position.
+                if (isInternalModuleImportEqualsDeclaration(node)) {
+                    const target = resolveSymbol(symbol);
+                    if (target === unknownSymbol || target.flags & SymbolFlags.Value) {
+                        // import foo = <symbol>
+                        checkExpressionCached(<Expression>node.moduleReference);
+                    }
                 }
             }
         }
@@ -12808,7 +12805,7 @@ namespace ts {
                     isSimpleTypeRelatedTo(source, target, relation, reportErrors ? reportError : undefined)) return Ternary.True;
 
                 const isComparingJsxAttributes = !!(getObjectFlags(source) & ObjectFlags.JsxAttributes);
-                const isPerformingExcessPropertyChecks = (isObjectLiteralType(source) && getObjectFlags(source) & ObjectFlags.FreshLiteral);
+                const isPerformingExcessPropertyChecks = !isApparentIntersectionConstituent && (isObjectLiteralType(source) && getObjectFlags(source) & ObjectFlags.FreshLiteral);
                 if (isPerformingExcessPropertyChecks) {
                     const discriminantType = target.flags & TypeFlags.Union ? findMatchingDiscriminantType(source, target as UnionType) : undefined;
                     if (hasExcessProperties(<FreshObjectLiteralType>source, target, discriminantType, reportErrors)) {
@@ -12819,11 +12816,11 @@ namespace ts {
                     }
                 }
 
-                if (relation !== comparableRelation && !isApparentIntersectionConstituent &&
+                const isPerformingCommonPropertyChecks = relation !== comparableRelation && !isApparentIntersectionConstituent &&
                     source.flags & (TypeFlags.Primitive | TypeFlags.Object | TypeFlags.Intersection) && source !== globalObjectType &&
                     target.flags & (TypeFlags.Object | TypeFlags.Intersection) && isWeakType(target) &&
-                    (getPropertiesOfType(source).length > 0 || typeHasCallOrConstructSignatures(source)) &&
-                    !hasCommonProperties(source, target, isComparingJsxAttributes)) {
+                    (getPropertiesOfType(source).length > 0 || typeHasCallOrConstructSignatures(source));
+                if (isPerformingCommonPropertyChecks && !hasCommonProperties(source, target, isComparingJsxAttributes)) {
                     if (reportErrors) {
                         const calls = getSignaturesOfType(source, SignatureKind.Call);
                         const constructs = getSignaturesOfType(source, SignatureKind.Construct);
@@ -12853,10 +12850,10 @@ namespace ts {
                 else {
                     if (target.flags & TypeFlags.Union) {
                         result = typeRelatedToSomeType(getRegularTypeOfObjectLiteral(source), <UnionType>target, reportErrors && !(source.flags & TypeFlags.Primitive) && !(target.flags & TypeFlags.Primitive));
-                        if (result && isPerformingExcessPropertyChecks) {
+                        if (result && (isPerformingExcessPropertyChecks || isPerformingCommonPropertyChecks)) {
                             // Validate against excess props using the original `source`
                             const discriminantType = findMatchingDiscriminantType(source, target as UnionType) || filterPrimitivesIfContainsNonPrimitive(target as UnionType);
-                            if (!propertiesRelatedTo(source, discriminantType, reportErrors, /*excludedProperties*/ undefined)) {
+                            if (!propertiesRelatedTo(source, discriminantType, reportErrors, /*excludedProperties*/ undefined, isIntersectionConstituent)) {
                                 return Ternary.False;
                             }
                         }
@@ -12864,9 +12861,9 @@ namespace ts {
                     else if (target.flags & TypeFlags.Intersection) {
                         isIntersectionConstituent = true; // set here to affect the following trio of checks
                         result = typeRelatedToEachType(getRegularTypeOfObjectLiteral(source), target as IntersectionType, reportErrors);
-                        if (result && isPerformingExcessPropertyChecks) {
+                        if (result && (isPerformingExcessPropertyChecks || isPerformingCommonPropertyChecks)) {
                             // Validate against excess props using the original `source`
-                            if (!propertiesRelatedTo(source, target, reportErrors, /*excludedProperties*/ undefined)) {
+                            if (!propertiesRelatedTo(source, target, reportErrors, /*excludedProperties*/ undefined, /*isIntersectionConstituent*/ false)) {
                                 return Ternary.False;
                             }
                         }
@@ -13192,7 +13189,7 @@ namespace ts {
                 return result;
             }
 
-            function typeArgumentsRelatedTo(sources: ReadonlyArray<Type> = emptyArray, targets: ReadonlyArray<Type> = emptyArray, variances: ReadonlyArray<VarianceFlags> = emptyArray, reportErrors: boolean): Ternary {
+            function typeArgumentsRelatedTo(sources: ReadonlyArray<Type> = emptyArray, targets: ReadonlyArray<Type> = emptyArray, variances: ReadonlyArray<VarianceFlags> = emptyArray, reportErrors: boolean, isIntersectionConstituent: boolean): Ternary {
                 if (sources.length !== targets.length && relation === identityRelation) {
                     return Ternary.False;
                 }
@@ -13216,10 +13213,10 @@ namespace ts {
                             related = relation === identityRelation ? isRelatedTo(s, t, /*reportErrors*/ false) : compareTypesIdentical(s, t);
                         }
                         else if (variance === VarianceFlags.Covariant) {
-                            related = isRelatedTo(s, t, reportErrors);
+                            related = isRelatedTo(s, t, reportErrors, /*headMessage*/ undefined, isIntersectionConstituent);
                         }
                         else if (variance === VarianceFlags.Contravariant) {
-                            related = isRelatedTo(t, s, reportErrors);
+                            related = isRelatedTo(t, s, reportErrors, /*headMessage*/ undefined, isIntersectionConstituent);
                         }
                         else if (variance === VarianceFlags.Bivariant) {
                             // In the bivariant case we first compare contravariantly without reporting
@@ -13228,16 +13225,16 @@ namespace ts {
                             // which is generally easier to reason about.
                             related = isRelatedTo(t, s, /*reportErrors*/ false);
                             if (!related) {
-                                related = isRelatedTo(s, t, reportErrors);
+                                related = isRelatedTo(s, t, reportErrors, /*headMessage*/ undefined, isIntersectionConstituent);
                             }
                         }
                         else {
                             // In the invariant case we first compare covariantly, and only when that
                             // succeeds do we proceed to compare contravariantly. Thus, error elaboration
                             // will typically be based on the covariant check.
-                            related = isRelatedTo(s, t, reportErrors);
+                            related = isRelatedTo(s, t, reportErrors, /*headMessage*/ undefined, isIntersectionConstituent);
                             if (related) {
-                                related &= isRelatedTo(t, s, reportErrors);
+                                related &= isRelatedTo(t, s, reportErrors, /*headMessage*/ undefined, isIntersectionConstituent);
                             }
                         }
                         if (!related) {
@@ -13383,7 +13380,7 @@ namespace ts {
                     source.aliasTypeArguments && source.aliasSymbol === target.aliasSymbol &&
                     !(source.aliasTypeArgumentsContainsMarker || target.aliasTypeArgumentsContainsMarker)) {
                     const variances = getAliasVariances(source.aliasSymbol);
-                    const varianceResult = relateVariances(source.aliasTypeArguments, target.aliasTypeArguments, variances);
+                    const varianceResult = relateVariances(source.aliasTypeArguments, target.aliasTypeArguments, variances, isIntersectionConstituent);
                     if (varianceResult !== undefined) {
                         return varianceResult;
                     }
@@ -13569,7 +13566,7 @@ namespace ts {
                         // type references (which are intended by be compared structurally). Obtain the variance
                         // information for the type parameters and relate the type arguments accordingly.
                         const variances = getVariances((<TypeReference>source).target);
-                        const varianceResult = relateVariances((<TypeReference>source).typeArguments, (<TypeReference>target).typeArguments, variances);
+                        const varianceResult = relateVariances((<TypeReference>source).typeArguments, (<TypeReference>target).typeArguments, variances, isIntersectionConstituent);
                         if (varianceResult !== undefined) {
                             return varianceResult;
                         }
@@ -13597,7 +13594,7 @@ namespace ts {
                     if (source.flags & (TypeFlags.Object | TypeFlags.Intersection) && target.flags & TypeFlags.Object) {
                         // Report structural errors only if we haven't reported any errors yet
                         const reportStructuralErrors = reportErrors && errorInfo === saveErrorInfo && !sourceIsPrimitive;
-                        result = propertiesRelatedTo(source, target, reportStructuralErrors, /*excludedProperties*/ undefined);
+                        result = propertiesRelatedTo(source, target, reportStructuralErrors, /*excludedProperties*/ undefined, isIntersectionConstituent);
                         if (result) {
                             result &= signaturesRelatedTo(source, target, SignatureKind.Call, reportStructuralErrors);
                             if (result) {
@@ -13633,8 +13630,8 @@ namespace ts {
                 }
                 return Ternary.False;
 
-                function relateVariances(sourceTypeArguments: ReadonlyArray<Type> | undefined, targetTypeArguments: ReadonlyArray<Type> | undefined, variances: VarianceFlags[]) {
-                    if (result = typeArgumentsRelatedTo(sourceTypeArguments, targetTypeArguments, variances, reportErrors)) {
+                function relateVariances(sourceTypeArguments: ReadonlyArray<Type> | undefined, targetTypeArguments: ReadonlyArray<Type> | undefined, variances: VarianceFlags[], isIntersectionConstituent: boolean) {
+                    if (result = typeArgumentsRelatedTo(sourceTypeArguments, targetTypeArguments, variances, reportErrors, isIntersectionConstituent)) {
                         return result;
                     }
                     if (some(variances, v => !!(v & VarianceFlags.AllowsStructuralFallback))) {
@@ -13762,7 +13759,7 @@ namespace ts {
                             if (!targetProperty) continue outer;
                             if (sourceProperty === targetProperty) continue;
                             // We compare the source property to the target in the context of a single discriminant type.
-                            const related = propertyRelatedTo(source, target, sourceProperty, targetProperty, _ => combination[i], /*reportErrors*/ false);
+                            const related = propertyRelatedTo(source, target, sourceProperty, targetProperty, _ => combination[i], /*reportErrors*/ false, /*isIntersectionConstituent*/ false);
                             // If the target property could not be found, or if the properties were not related,
                             // then this constituent is not a match.
                             if (!related) {
@@ -13781,7 +13778,7 @@ namespace ts {
                 // Compare the remaining non-discriminant properties of each match.
                 let result = Ternary.True;
                 for (const type of matchingTypes) {
-                    result &= propertiesRelatedTo(source, type, /*reportErrors*/ false, excludedProperties);
+                    result &= propertiesRelatedTo(source, type, /*reportErrors*/ false, excludedProperties, /*isIntersectionConstituent*/ false);
                     if (result) {
                         result &= signaturesRelatedTo(source, type, SignatureKind.Call, /*reportStructuralErrors*/ false);
                         if (result) {
@@ -13817,7 +13814,7 @@ namespace ts {
                 return result || properties;
             }
 
-            function isPropertySymbolTypeRelated(sourceProp: Symbol, targetProp: Symbol, getTypeOfSourceProperty: (sym: Symbol) => Type, reportErrors: boolean): Ternary {
+            function isPropertySymbolTypeRelated(sourceProp: Symbol, targetProp: Symbol, getTypeOfSourceProperty: (sym: Symbol) => Type, reportErrors: boolean, isIntersectionConstituent: boolean): Ternary {
                 const targetIsOptional = strictNullChecks && !!(getCheckFlags(targetProp) & CheckFlags.Partial);
                 const source = getTypeOfSourceProperty(sourceProp);
                 if (getCheckFlags(targetProp) & CheckFlags.DeferredType && !getSymbolLinks(targetProp).type) {
@@ -13856,11 +13853,11 @@ namespace ts {
                     return result;
                 }
                 else {
-                    return isRelatedTo(source, addOptionality(getTypeOfSymbol(targetProp), targetIsOptional), reportErrors);
+                    return isRelatedTo(source, addOptionality(getTypeOfSymbol(targetProp), targetIsOptional), reportErrors, /*headMessage*/ undefined, isIntersectionConstituent);
                 }
             }
 
-            function propertyRelatedTo(source: Type, target: Type, sourceProp: Symbol, targetProp: Symbol, getTypeOfSourceProperty: (sym: Symbol) => Type, reportErrors: boolean): Ternary {
+            function propertyRelatedTo(source: Type, target: Type, sourceProp: Symbol, targetProp: Symbol, getTypeOfSourceProperty: (sym: Symbol) => Type, reportErrors: boolean, isIntersectionConstituent: boolean): Ternary {
                 const sourcePropFlags = getDeclarationModifierFlagsFromSymbol(sourceProp);
                 const targetPropFlags = getDeclarationModifierFlagsFromSymbol(targetProp);
                 if (sourcePropFlags & ModifierFlags.Private || targetPropFlags & ModifierFlags.Private) {
@@ -13902,7 +13899,7 @@ namespace ts {
                     return Ternary.False;
                 }
                 // If the target comes from a partial union prop, allow `undefined` in the target type
-                const related = isPropertySymbolTypeRelated(sourceProp, targetProp, getTypeOfSourceProperty, reportErrors);
+                const related = isPropertySymbolTypeRelated(sourceProp, targetProp, getTypeOfSourceProperty, reportErrors, isIntersectionConstituent);
                 if (!related) {
                     if (reportErrors) {
                         reportError(Diagnostics.Types_of_property_0_are_incompatible, symbolToString(targetProp));
@@ -13927,7 +13924,7 @@ namespace ts {
                 return related;
             }
 
-            function propertiesRelatedTo(source: Type, target: Type, reportErrors: boolean, excludedProperties: UnderscoreEscapedMap<true> | undefined): Ternary {
+            function propertiesRelatedTo(source: Type, target: Type, reportErrors: boolean, excludedProperties: UnderscoreEscapedMap<true> | undefined, isIntersectionConstituent: boolean): Ternary {
                 if (relation === identityRelation) {
                     return propertiesIdenticalTo(source, target, excludedProperties);
                 }
@@ -14014,7 +14011,7 @@ namespace ts {
                     if (!(targetProp.flags & SymbolFlags.Prototype)) {
                         const sourceProp = getPropertyOfType(source, targetProp.escapedName);
                         if (sourceProp && sourceProp !== targetProp) {
-                            const related = propertyRelatedTo(source, target, sourceProp, targetProp, getTypeOfSymbol, reportErrors);
+                            const related = propertyRelatedTo(source, target, sourceProp, targetProp, getTypeOfSymbol, reportErrors, isIntersectionConstituent);
                             if (!related) {
                                 return Ternary.False;
                             }
@@ -17833,8 +17830,12 @@ namespace ts {
             return type;
         }
 
+        function isExportOrExportExpression(location: Node) {
+            return !!findAncestor(location, e => e.parent && isExportAssignment(e.parent) && e.parent.expression === e && isEntityNameExpression(e));
+        }
+
         function markAliasReferenced(symbol: Symbol, location: Node) {
-            if (isNonLocalAlias(symbol, /*excludes*/ SymbolFlags.Value) && !isInTypeQuery(location) && !isConstEnumOrConstEnumOnlyModule(resolveAlias(symbol))) {
+            if (isNonLocalAlias(symbol, /*excludes*/ SymbolFlags.Value) && !isInTypeQuery(location) && ((compilerOptions.preserveConstEnums && isExportOrExportExpression(location)) || !isConstEnumOrConstEnumOnlyModule(resolveAlias(symbol)))) {
                 markAliasSymbolAsReferenced(symbol);
             }
         }
@@ -18814,6 +18815,17 @@ namespace ts {
             }
 
             return false;
+        }
+
+        function getContextualIterationType(kind: IterationTypeKind, functionDecl: SignatureDeclaration): Type | undefined {
+            const isAsync = !!(getFunctionFlags(functionDecl) & FunctionFlags.Async);
+            const contextualReturnType = getContextualReturnType(functionDecl);
+            if (contextualReturnType) {
+                return getIterationTypeOfGeneratorFunctionReturnType(kind, contextualReturnType, isAsync)
+                    || undefined;
+            }
+
+            return undefined;
         }
 
         function getContextualReturnType(functionDecl: SignatureDeclaration): Type | undefined {
@@ -20345,8 +20357,8 @@ namespace ts {
                 // if jsx emit was not react as there wont be error being emitted
                 reactSym.isReferenced = SymbolFlags.All;
 
-                // If react symbol is alias, mark it as referenced
-                if (reactSym.flags & SymbolFlags.Alias && !isConstEnumOrConstEnumOnlyModule(resolveAlias(reactSym))) {
+                // If react symbol is alias, mark it as refereced
+                if (reactSym.flags & SymbolFlags.Alias) {
                     markAliasSymbolAsReferenced(reactSym);
                 }
             }
@@ -23481,7 +23493,11 @@ namespace ts {
             }
 
             if (isGenerator) {
-                return createGeneratorReturnType(yieldType || neverType, returnType || fallbackReturnType, nextType || unknownType, isAsync);
+                return createGeneratorReturnType(
+                    yieldType || neverType,
+                    returnType || fallbackReturnType,
+                    nextType || getContextualIterationType(IterationTypeKind.Next, func) || unknownType,
+                    isAsync);
             }
             else {
                 // From within an async function you can return either a non-promise value or a promise. Any
@@ -24842,13 +24858,7 @@ namespace ts {
                     || anyType;
             }
 
-            const contextualReturnType = getContextualReturnType(func);
-            if (contextualReturnType) {
-                return getIterationTypeOfGeneratorFunctionReturnType(IterationTypeKind.Next, contextualReturnType, isAsync)
-                    || anyType;
-            }
-
-            return anyType;
+            return getContextualIterationType(IterationTypeKind.Next, func) || anyType;
         }
 
         function checkConditionalExpression(node: ConditionalExpression, checkMode?: CheckMode): Type {
@@ -24897,7 +24907,7 @@ namespace ts {
             return result;
         }
 
-        function checkExpressionCached(node: Expression, checkMode?: CheckMode): Type {
+        function checkExpressionCached(node: Expression | QualifiedName, checkMode?: CheckMode): Type {
             const links = getNodeLinks(node);
             if (!links.resolvedType) {
                 if (checkMode && checkMode !== CheckMode.Normal) {
@@ -25225,7 +25235,8 @@ namespace ts {
                 (node.parent.kind === SyntaxKind.PropertyAccessExpression && (<PropertyAccessExpression>node.parent).expression === node) ||
                 (node.parent.kind === SyntaxKind.ElementAccessExpression && (<ElementAccessExpression>node.parent).expression === node) ||
                 ((node.kind === SyntaxKind.Identifier || node.kind === SyntaxKind.QualifiedName) && isInRightSideOfImportOrExportAssignment(<Identifier>node) ||
-                    (node.parent.kind === SyntaxKind.TypeQuery && (<TypeQueryNode>node.parent).exprName === node));
+                    (node.parent.kind === SyntaxKind.TypeQuery && (<TypeQueryNode>node.parent).exprName === node)) ||
+                (node.parent.kind === SyntaxKind.ExportSpecifier && (compilerOptions.preserveConstEnums || node.flags & NodeFlags.Ambient)); // We allow reexporting const enums
 
             if (!ok) {
                 error(node, Diagnostics.const_enums_can_only_be_used_in_property_or_index_access_expressions_or_the_right_hand_side_of_an_import_declaration_or_export_assignment_or_type_query);
@@ -30153,6 +30164,10 @@ namespace ts {
                 }
                 else {
                     markExportAsReferenced(node);
+                    const target = symbol && (symbol.flags & SymbolFlags.Alias ? resolveAlias(symbol) : symbol);
+                    if (!target || target === unknownSymbol || target.flags & SymbolFlags.Value) {
+                        checkExpressionCached(node.propertyName || node.name);
+                    }
                 }
             }
         }
@@ -30179,7 +30194,17 @@ namespace ts {
                 grammarErrorOnFirstToken(node, Diagnostics.An_export_assignment_cannot_have_modifiers);
             }
             if (node.expression.kind === SyntaxKind.Identifier) {
-                markExportAsReferenced(node);
+                const id = node.expression as Identifier;
+                const sym = resolveEntityName(id, SymbolFlags.All, /*ignoreErrors*/ true, /*dontResolveAlias*/ true, node);
+                if (sym) {
+                    markAliasReferenced(sym, id);
+                    // If not a value, we're interpreting the identifier as a type export, along the lines of (`export { Id as default }`)
+                    const target = sym.flags & SymbolFlags.Alias ? resolveAlias(sym) : sym;
+                    if (target === unknownSymbol || target.flags & SymbolFlags.Value) {
+                        // However if it is a value, we need to check it's being used correctly
+                        checkExpressionCached(node.expression);
+                    }
+                }
 
                 if (getEmitDeclarations(compilerOptions)) {
                     collectLinkedAliases(node.expression as Identifier, /*setVisibility*/ true);
