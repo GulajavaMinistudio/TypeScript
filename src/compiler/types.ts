@@ -1679,6 +1679,8 @@ namespace ts {
         /* @internal */
         ContainsSeparator = 1 << 9, // e.g. `0b1100_0101`
         /* @internal */
+        UnicodeEscape = 1 << 10,
+        /* @internal */
         BinaryOrOctalSpecifier = BinarySpecifier | OctalSpecifier,
         /* @internal */
         NumericLiteralFlags = Scientific | Octal | HexSpecifier | BinaryOrOctalSpecifier | ContainsSeparator
@@ -1862,6 +1864,12 @@ namespace ts {
         kind: SyntaxKind.MetaProperty;
         keywordToken: SyntaxKind.NewKeyword | SyntaxKind.ImportKeyword;
         name: Identifier;
+    }
+
+    /* @internal */
+    export interface ImportMetaProperty extends MetaProperty {
+        keywordToken: SyntaxKind.ImportKeyword;
+        name: Identifier & { escapedText: __String & "meta" };
     }
 
     /// A JSX expression of the form <TagName attrs>...</TagName>
