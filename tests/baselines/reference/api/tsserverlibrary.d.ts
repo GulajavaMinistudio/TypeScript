@@ -543,7 +543,7 @@ declare namespace ts {
     }
     export type EntityName = Identifier | QualifiedName;
     export type PropertyName = Identifier | StringLiteral | NumericLiteral | ComputedPropertyName;
-    export type DeclarationName = Identifier | StringLiteralLike | NumericLiteral | ComputedPropertyName | BindingPattern;
+    export type DeclarationName = Identifier | StringLiteralLike | NumericLiteral | ComputedPropertyName | ElementAccessExpression | BindingPattern;
     export interface Declaration extends Node {
         _declarationBrand: any;
     }
@@ -2637,9 +2637,14 @@ declare namespace ts {
         /** Paths used to compute primary types search locations */
         typeRoots?: string[];
         esModuleInterop?: boolean;
+        useDefineForClassFields?: boolean;
         [option: string]: CompilerOptionsValue | TsConfigSourceFile | undefined;
     }
     export interface TypeAcquisition {
+        /**
+         * @deprecated typingOptions.enableAutoDiscovery
+         * Use typeAcquisition.enable instead.
+         */
         enableAutoDiscovery?: boolean;
         enable?: boolean;
         include?: string[];
@@ -3057,6 +3062,11 @@ declare namespace ts {
     export interface GetEffectiveTypeRootsHost {
         directoryExists?(directoryName: string): boolean;
         getCurrentDirectory?(): string;
+    }
+    export interface ModuleSpecifierResolutionHost extends GetEffectiveTypeRootsHost {
+        useCaseSensitiveFileNames?(): boolean;
+        fileExists?(path: string): boolean;
+        readFile?(path: string): string | undefined;
     }
     export interface TextSpan {
         start: number;
@@ -3585,7 +3595,7 @@ declare namespace ts {
     function isUnparsedTextLike(node: Node): node is UnparsedTextLike;
     function isUnparsedNode(node: Node): node is UnparsedNode;
     function isJSDocTypeExpression(node: Node): node is JSDocTypeExpression;
-    function isJSDocAllType(node: JSDocAllType): node is JSDocAllType;
+    function isJSDocAllType(node: Node): node is JSDocAllType;
     function isJSDocUnknownType(node: Node): node is JSDocUnknownType;
     function isJSDocNullableType(node: Node): node is JSDocNullableType;
     function isJSDocNonNullableType(node: Node): node is JSDocNonNullableType;
@@ -4218,7 +4228,7 @@ declare namespace ts {
     /**
      * Sets the constant value to emit for an expression.
      */
-    function setConstantValue(node: PropertyAccessExpression | ElementAccessExpression, value: string | number): PropertyAccessExpression | ElementAccessExpression;
+    function setConstantValue(node: PropertyAccessExpression | ElementAccessExpression, value: string | number): ElementAccessExpression | PropertyAccessExpression;
     /**
      * Adds an EmitHelper to a node.
      */
@@ -4921,7 +4931,7 @@ declare namespace ts {
         fileName: Path;
         packageName: string;
     }
-    interface LanguageServiceHost extends GetEffectiveTypeRootsHost {
+    interface LanguageServiceHost extends ModuleSpecifierResolutionHost {
         getCompilationSettings(): CompilerOptions;
         getNewLine?(): string;
         getProjectVersion?(): string;
@@ -4937,7 +4947,6 @@ declare namespace ts {
         log?(s: string): void;
         trace?(s: string): void;
         error?(s: string): void;
-        useCaseSensitiveFileNames?(): boolean;
         readDirectory?(path: string, extensions?: readonly string[], exclude?: readonly string[], include?: readonly string[], depth?: number): string[];
         readFile?(path: string, encoding?: string): string | undefined;
         realpath?(path: string): string;
@@ -5298,6 +5307,11 @@ declare namespace ts {
         Block = 1,
         Smart = 2
     }
+    enum SemicolonPreference {
+        Ignore = "ignore",
+        Insert = "insert",
+        Remove = "remove"
+    }
     interface EditorOptions {
         BaseIndentSize?: number;
         IndentSize: number;
@@ -5350,6 +5364,7 @@ declare namespace ts {
         readonly placeOpenBraceOnNewLineForControlBlocks?: boolean;
         readonly insertSpaceBeforeTypeAnnotation?: boolean;
         readonly indentMultiLineObjectLiteralBeginningOnBlankLine?: boolean;
+        readonly semicolons?: SemicolonPreference;
     }
     function getDefaultFormatCodeSettings(newLineCharacter?: string): FormatCodeSettings;
     interface DefinitionInfo extends DocumentSpan {
@@ -8197,6 +8212,11 @@ declare namespace ts.server.protocol {
         Block = "Block",
         Smart = "Smart"
     }
+    enum SemicolonPreference {
+        Ignore = "ignore",
+        Insert = "insert",
+        Remove = "remove"
+    }
     interface EditorSettings {
         baseIndentSize?: number;
         indentSize?: number;
@@ -8222,6 +8242,7 @@ declare namespace ts.server.protocol {
         placeOpenBraceOnNewLineForFunctions?: boolean;
         placeOpenBraceOnNewLineForControlBlocks?: boolean;
         insertSpaceBeforeTypeAnnotation?: boolean;
+        semicolons?: SemicolonPreference;
     }
     interface UserPreferences {
         readonly disableSuggestions?: boolean;
@@ -8305,6 +8326,7 @@ declare namespace ts.server.protocol {
         strictNullChecks?: boolean;
         suppressExcessPropertyErrors?: boolean;
         suppressImplicitAnyIndexErrors?: boolean;
+        useDefineForClassFields?: boolean;
         target?: ScriptTarget | ts.ScriptTarget;
         traceResolution?: boolean;
         resolveJsonModule?: boolean;
@@ -8586,6 +8608,7 @@ declare namespace ts.server {
         private enableProxy;
         /** Starts a new check for diagnostics. Call this if some file has updated that would cause diagnostics to be changed. */
         refreshDiagnostics(): void;
+        private watchPackageJsonFile;
     }
     /**
      * If a file is opened and no tsconfig (or jsconfig) is found,

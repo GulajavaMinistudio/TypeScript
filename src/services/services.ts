@@ -99,7 +99,7 @@ namespace ts {
             return this._children || (this._children = createChildren(this, sourceFile));
         }
 
-        public getFirstToken(sourceFile?: SourceFile): Node | undefined {
+        public getFirstToken(sourceFile?: SourceFileLike): Node | undefined {
             this.assertHasRealPosition();
             const children = this.getChildren(sourceFile);
             if (!children.length) {
@@ -112,7 +112,7 @@ namespace ts {
                 child.getFirstToken(sourceFile);
         }
 
-        public getLastToken(sourceFile?: SourceFile): Node | undefined {
+        public getLastToken(sourceFile?: SourceFileLike): Node | undefined {
             this.assertHasRealPosition();
             const children = this.getChildren(sourceFile);
 
@@ -339,7 +339,6 @@ namespace ts {
     }
 
     class TokenObject<TKind extends SyntaxKind> extends TokenOrIdentifierObject implements Token<TKind> {
-        public symbol!: Symbol;
         public kind: TKind;
 
         constructor(kind: TKind, pos: number, end: number) {
@@ -349,9 +348,8 @@ namespace ts {
     }
 
     class IdentifierObject extends TokenOrIdentifierObject implements Identifier {
-        public kind!: SyntaxKind.Identifier;
+        public kind: SyntaxKind.Identifier = SyntaxKind.Identifier;
         public escapedText!: __String;
-        public symbol!: Symbol;
         public autoGenerateFlags!: GeneratedIdentifierFlags;
         _primaryExpressionBrand: any;
         _memberExpressionBrand: any;
@@ -541,7 +539,7 @@ namespace ts {
     }
 
     class SourceFileObject extends NodeObject implements SourceFile {
-        public kind!: SyntaxKind.SourceFile;
+        public kind: SyntaxKind.SourceFile = SyntaxKind.SourceFile;
         public _declarationBrand: any;
         public fileName!: string;
         public path!: Path;
@@ -1464,7 +1462,7 @@ namespace ts {
 
         function getCompletionEntrySymbol(fileName: string, position: number, name: string, source?: string): Symbol | undefined {
             synchronizeHostData();
-            return Completions.getCompletionEntrySymbol(program, log, getValidSourceFile(fileName), position, { name, source });
+            return Completions.getCompletionEntrySymbol(program, log, getValidSourceFile(fileName), position, { name, source }, host);
         }
 
         function getQuickInfoAtPosition(fileName: string, position: number): QuickInfo | undefined {
@@ -2233,6 +2231,7 @@ namespace ts {
     function getContainingObjectLiteralElementWorker(node: Node): ObjectLiteralElement | undefined {
         switch (node.kind) {
             case SyntaxKind.StringLiteral:
+            case SyntaxKind.NoSubstitutionTemplateLiteral:
             case SyntaxKind.NumericLiteral:
                 if (node.parent.kind === SyntaxKind.ComputedPropertyName) {
                     return isObjectLiteralElement(node.parent.parent) ? node.parent.parent : undefined;
