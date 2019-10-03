@@ -2060,7 +2060,7 @@ namespace ts {
             idText(expr.expression.expression) === "Object" &&
             idText(expr.expression.name) === "defineProperty" &&
             isStringOrNumericLiteralLike(expr.arguments[1]) &&
-            isBindableStaticNameExpression(expr.arguments[0]);
+            isBindableStaticNameExpression(expr.arguments[0], /*excludeThisKeyword*/ true);
     }
 
     export function isBindableStaticElementAccessExpression(node: Node, excludeThisKeyword?: boolean): node is BindableStaticElementAccessExpression {
@@ -5906,9 +5906,11 @@ namespace ts {
     }
 
     export function isOptionalChain(node: Node): node is PropertyAccessChain | ElementAccessChain | CallChain {
-        return isPropertyAccessChain(node)
-            || isElementAccessChain(node)
-            || isCallChain(node);
+        const kind = node.kind;
+        return !!(node.flags & NodeFlags.OptionalChain) &&
+            (kind === SyntaxKind.PropertyAccessExpression
+                || kind === SyntaxKind.ElementAccessExpression
+                || kind === SyntaxKind.CallExpression);
     }
 
     export function isNewExpression(node: Node): node is NewExpression {

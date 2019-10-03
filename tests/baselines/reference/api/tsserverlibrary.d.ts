@@ -4902,6 +4902,9 @@ declare namespace ts {
         isClassOrInterface(): this is InterfaceType;
         isClass(): this is InterfaceType;
     }
+    interface TypeReference {
+        typeArguments?: readonly Type[];
+    }
     interface Signature {
         getDeclaration(): SignatureDeclaration;
         getTypeParameters(): TypeParameter[] | undefined;
@@ -8553,7 +8556,7 @@ declare namespace ts.server {
         static resolveModule(moduleName: string, initialDir: string, host: ServerHost, log: (message: string) => void, logErrors?: (message: string) => void): {} | undefined;
         isKnownTypesPackageName(name: string): boolean;
         installPackage(options: InstallPackageOptions): Promise<ApplyCodeActionCommandResult>;
-        private readonly typingsCache;
+        private get typingsCache();
         getCompilationSettings(): CompilerOptions;
         getCompilerOptions(): CompilerOptions;
         getNewLine(): string;
