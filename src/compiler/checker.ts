@@ -7436,7 +7436,9 @@ namespace ts {
                         }
                         else {
                             Debug.assert(!!getter, "there must exist a getter as we are current checking either setter or getter in this function");
-                            errorOrSuggestion(noImplicitAny, getter!, Diagnostics.Property_0_implicitly_has_type_any_because_its_get_accessor_lacks_a_return_type_annotation, symbolToString(symbol));
+                            if (!isPrivateWithinAmbient(getter!)) {
+                                errorOrSuggestion(noImplicitAny, getter!, Diagnostics.Property_0_implicitly_has_type_any_because_its_get_accessor_lacks_a_return_type_annotation, symbolToString(symbol));
+                            }
                         }
                         return anyType;
                     }
@@ -18800,6 +18802,13 @@ namespace ts {
             return !(flow.flags & FlowFlags.PreFinally && (<PreFinallyFlow>flow).lock.locked) && isReachableFlowNodeWorker(flow, /*skipCacheCheck*/ false);
         }
 
+        function isFalseExpression(expr: Expression): boolean {
+            const node = skipParentheses(expr);
+            return node.kind === SyntaxKind.FalseKeyword || node.kind === SyntaxKind.BinaryExpression && (
+                (<BinaryExpression>node).operatorToken.kind === SyntaxKind.AmpersandAmpersandToken && (isFalseExpression((<BinaryExpression>node).left) || isFalseExpression((<BinaryExpression>node).right)) ||
+                (<BinaryExpression>node).operatorToken.kind === SyntaxKind.BarBarToken && isFalseExpression((<BinaryExpression>node).left) && isFalseExpression((<BinaryExpression>node).right));
+        }
+
         function isReachableFlowNodeWorker(flow: FlowNode, noCacheCheck: boolean): boolean {
             while (true) {
                 if (flow === lastFlowNode) {
@@ -18819,8 +18828,17 @@ namespace ts {
                 }
                 else if (flags & FlowFlags.Call) {
                     const signature = getEffectsSignature((<FlowCall>flow).node);
-                    if (signature && getReturnTypeOfSignature(signature).flags & TypeFlags.Never) {
-                        return false;
+                    if (signature) {
+                        const predicate = getTypePredicateOfSignature(signature);
+                        if (predicate && predicate.kind === TypePredicateKind.AssertsIdentifier) {
+                            const predicateArgument = (<FlowCall>flow).node.arguments[predicate.parameterIndex];
+                            if (predicateArgument && isFalseExpression(predicateArgument)) {
+                                return false;
+                            }
+                        }
+                        if (getReturnTypeOfSignature(signature).flags & TypeFlags.Never) {
+                            return false;
+                        }
                     }
                     flow = (<FlowCall>flow).antecedent;
                 }
@@ -19059,6 +19077,9 @@ namespace ts {
 
             function narrowTypeByAssertion(type: Type, expr: Expression): Type {
                 const node = skipParentheses(expr);
+                if (node.kind === SyntaxKind.FalseKeyword) {
+                    return unreachableNeverType;
+                }
                 if (node.kind === SyntaxKind.BinaryExpression) {
                     if ((<BinaryExpression>node).operatorToken.kind === SyntaxKind.AmpersandAmpersandToken) {
                         return narrowTypeByAssertion(narrowTypeByAssertion(type, (<BinaryExpression>node).left), (<BinaryExpression>node).right);
@@ -19078,7 +19099,7 @@ namespace ts {
                         const flowType = getTypeAtFlowNode(flow.antecedent);
                         const type = getTypeFromFlowType(flowType);
                         const narrowedType = predicate.type ? narrowTypeByTypePredicate(type, predicate, flow.node, /*assumeTrue*/ true) :
-                            predicate.kind === TypePredicateKind.AssertsIdentifier ? narrowTypeByAssertion(type, flow.node.arguments[predicate.parameterIndex]) :
+                            predicate.kind === TypePredicateKind.AssertsIdentifier && predicate.parameterIndex >= 0 && predicate.parameterIndex < flow.node.arguments.length ? narrowTypeByAssertion(type, flow.node.arguments[predicate.parameterIndex]) :
                             type;
                         return narrowedType === type ? flowType : createFlowType(narrowedType, isIncomplete(flowType));
                     }
