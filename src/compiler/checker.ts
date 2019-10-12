@@ -5350,7 +5350,7 @@ namespace ts {
                     // so we don't even have placeholders to fill in.
                     if (length(realMembers)) {
                         const localName = getInternalSymbolName(symbol, symbolName);
-                        serializeAsNamespaceDeclaration(realMembers, localName, modifierFlags, /*suppressNewPrivateContext*/ false);
+                        serializeAsNamespaceDeclaration(realMembers, localName, modifierFlags, !!(symbol.flags & SymbolFlags.Function));
                     }
                     if (length(mergedMembers)) {
                         const localName = getInternalSymbolName(symbol, symbolName);
@@ -5593,7 +5593,10 @@ namespace ts {
                                 /*decorators*/ undefined,
                                 /*modifiers*/ undefined,
                                 createImportClause(createIdentifier(localName), /*namedBindings*/ undefined),
-                                createLiteral(getSpecifierForModuleSymbol(target.parent!, context))
+                                // We use `target.parent || target` below as `target.parent` is unset when the target is a module which has been export assigned
+                                // And then made into a default by the `esModuleInterop` or `allowSyntheticDefaultImports` flag
+                                // In such cases, the `target` refers to the module itself already
+                                createLiteral(getSpecifierForModuleSymbol(target.parent || target, context))
                             ), ModifierFlags.None);
                             break;
                         case SyntaxKind.NamespaceImport:
@@ -5614,7 +5617,7 @@ namespace ts {
                                         createIdentifier(localName)
                                     )
                                 ])),
-                                createLiteral(getSpecifierForModuleSymbol(target.parent!, context))
+                                createLiteral(getSpecifierForModuleSymbol(target.parent || target, context))
                             ), ModifierFlags.None);
                             break;
                         case SyntaxKind.ExportSpecifier:
@@ -35005,12 +35008,12 @@ namespace ts {
                         typeToString(node.type ? getTypeFromTypeNode(node.type) : anyType));
                 }
 
-                if (type.flags & TypeFlags.Union && allTypesAssignableToKind(type, TypeFlags.StringLiteral, /*strict*/ true)) {
+                if (type.flags & TypeFlags.Union && allTypesAssignableToKind(type, TypeFlags.StringOrNumberLiteral, /*strict*/ true)) {
                     return grammarErrorOnNode(parameter.name,
                         Diagnostics.An_index_signature_parameter_type_cannot_be_a_union_type_Consider_using_a_mapped_object_type_instead);
                 }
 
-                return grammarErrorOnNode(parameter.name, Diagnostics.An_index_signature_parameter_type_must_be_string_or_number);
+                return grammarErrorOnNode(parameter.name, Diagnostics.An_index_signature_parameter_type_must_be_either_string_or_number);
             }
             if (!node.type) {
                 return grammarErrorOnNode(node, Diagnostics.An_index_signature_must_have_a_type_annotation);
