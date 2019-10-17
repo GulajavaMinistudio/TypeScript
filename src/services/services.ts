@@ -527,11 +527,11 @@ namespace ts {
 
         let doc = JsDoc.getJsDocCommentsFromDeclarations(declarations);
         if (doc.length === 0 || declarations.some(hasJSDocInheritDocTag)) {
-            for (const declaration of declarations) {
+            forEachUnique(declarations, declaration => {
                 const inheritedDocs = findInheritedJSDocComments(declaration, declaration.symbol.name, checker!); // TODO: GH#18217
                 // TODO: GH#16312 Return a ReadonlyArray, avoid copying inheritedDocs
                 if (inheritedDocs) doc = doc.length === 0 ? inheritedDocs.slice() : inheritedDocs.concat(lineBreakPart(), doc);
-            }
+            });
         }
         return doc;
     }
@@ -1638,12 +1638,12 @@ namespace ts {
             return NavigateTo.getNavigateToItems(sourceFiles, program.getTypeChecker(), cancellationToken, searchValue, maxResultCount, excludeDtsFiles);
         }
 
-        function getEmitOutput(fileName: string, emitOnlyDtsFiles = false) {
+        function getEmitOutput(fileName: string, emitOnlyDtsFiles?: boolean, forceDtsEmit?: boolean) {
             synchronizeHostData();
 
             const sourceFile = getValidSourceFile(fileName);
             const customTransformers = host.getCustomTransformers && host.getCustomTransformers();
-            return getFileEmitOutput(program, sourceFile, emitOnlyDtsFiles, cancellationToken, customTransformers);
+            return getFileEmitOutput(program, sourceFile, !!emitOnlyDtsFiles, cancellationToken, customTransformers, forceDtsEmit);
         }
 
         // Signature help
