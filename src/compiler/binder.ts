@@ -821,9 +821,6 @@ namespace ts {
                 case SyntaxKind.JSDocEnumTag:
                     bindJSDocTypeAlias(node as JSDocTypedefTag | JSDocCallbackTag | JSDocEnumTag);
                     break;
-                case SyntaxKind.JSDocClassTag:
-                    bindJSDocClassTag(node as JSDocClassTag);
-                    break;
                 // In source files and blocks, bind functions first to match hoisting that occurs at runtime
                 case SyntaxKind.SourceFile: {
                     bindEachFunctionsFirst((node as SourceFile).statements);
@@ -956,7 +953,7 @@ namespace ts {
             }
             if (expression.kind === SyntaxKind.TrueKeyword && flags & FlowFlags.FalseCondition ||
                 expression.kind === SyntaxKind.FalseKeyword && flags & FlowFlags.TrueCondition) {
-                if (!isOptionalChainRoot(expression.parent)) {
+                if (!isExpressionOfOptionalChainRoot(expression)) {
                     return unreachableFlow;
                 }
             }
@@ -2454,6 +2451,8 @@ namespace ts {
                 case SyntaxKind.JSDocTypeLiteral:
                 case SyntaxKind.MappedType:
                     return bindAnonymousTypeWorker(node as TypeLiteralNode | MappedTypeNode | JSDocTypeLiteral);
+                case SyntaxKind.JSDocClassTag:
+                    return bindJSDocClassTag(node as JSDocClassTag);
                 case SyntaxKind.ObjectLiteralExpression:
                     return bindObjectLiteralExpression(<ObjectLiteralExpression>node);
                 case SyntaxKind.FunctionExpression:
@@ -2789,6 +2788,10 @@ namespace ts {
 
         function bindObjectDefinePrototypeProperty(node: BindableObjectDefinePropertyCall) {
             const namespaceSymbol = lookupSymbolForPropertyAccess((node.arguments[0] as PropertyAccessExpression).expression as EntityNameExpression);
+            if (namespaceSymbol) {
+                // Ensure the namespace symbol becomes class-like
+                addDeclarationToSymbol(namespaceSymbol, namespaceSymbol.valueDeclaration, SymbolFlags.Class);
+            }
             bindPotentiallyNewExpandoMemberToNamespace(node, namespaceSymbol, /*isPrototypeProperty*/ true);
         }
 
@@ -2870,7 +2873,7 @@ namespace ts {
                     }
                 });
             }
-            if (containerIsClass && namespaceSymbol) {
+            if (containerIsClass && namespaceSymbol && namespaceSymbol.valueDeclaration) {
                 addDeclarationToSymbol(namespaceSymbol, namespaceSymbol.valueDeclaration, SymbolFlags.Class);
             }
             return namespaceSymbol;
