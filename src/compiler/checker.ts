@@ -17354,10 +17354,7 @@ namespace ts {
                         // inferring a type parameter constraint. Instead, make a lower priority inference from
                         // the full source to whatever remains in the target. For example, when inferring from
                         // string to 'string | T', make a lower priority inference of string for T.
-                        const savePriority = priority;
-                        priority |= InferencePriority.NakedTypeVariable;
-                        inferFromTypes(source, target);
-                        priority = savePriority;
+                        inferWithPriority(source, target, InferencePriority.NakedTypeVariable);
                         return;
                     }
                     source = getUnionType(sources);
@@ -17459,10 +17456,7 @@ namespace ts {
                 else if ((isLiteralType(source) || source.flags & TypeFlags.String) && target.flags & TypeFlags.Index) {
                     const empty = createEmptyObjectTypeFromStringLiteral(source);
                     contravariant = !contravariant;
-                    const savePriority = priority;
-                    priority |= InferencePriority.LiteralKeyof;
-                    inferFromTypes(empty, (target as IndexType).type);
-                    priority = savePriority;
+                    inferWithPriority(empty, (target as IndexType).type, InferencePriority.LiteralKeyof);
                     contravariant = !contravariant;
                 }
                 else if (source.flags & TypeFlags.IndexedAccess && target.flags & TypeFlags.IndexedAccess) {
@@ -17512,6 +17506,13 @@ namespace ts {
                         invokeOnce(source, target, inferFromObjectTypes);
                     }
                 }
+            }
+
+            function inferWithPriority(source: Type, target: Type, newPriority: InferencePriority) {
+                const savePriority = priority;
+                priority |= newPriority;
+                inferFromTypes(source, target);
+                priority = savePriority;
             }
 
             function invokeOnce(source: Type, target: Type, action: (source: Type, target: Type) => void) {
@@ -17581,6 +17582,18 @@ namespace ts {
                 return undefined;
             }
 
+            function getSingleTypeVariableFromIntersectionTypes(types: Type[]) {
+                let typeVariable: Type | undefined;
+                for (const type of types) {
+                    const t = type.flags & TypeFlags.Intersection && find((<IntersectionType>type).types, t => !!getInferenceInfoForType(t));
+                    if (!t || typeVariable && t !== typeVariable) {
+                        return undefined;
+                    }
+                    typeVariable = t;
+                }
+                return typeVariable;
+            }
+
             function inferToMultipleTypes(source: Type, targets: Type[], targetFlags: TypeFlags) {
                 let typeVariableCount = 0;
                 if (targetFlags & TypeFlags.Union) {
@@ -17607,6 +17620,16 @@ namespace ts {
                                 inferencePriority = Math.min(inferencePriority, saveInferencePriority);
                             }
                         }
+                    }
+                    if (typeVariableCount === 0) {
+                        // If every target is an intersection of types containing a single naked type variable,
+                        // make a lower priority inference to that type variable. This handles inferring from
+                        // 'A | B' to 'T & (X | Y)' where we want to infer 'A | B' for T.
+                        const intersectionTypeVariable = getSingleTypeVariableFromIntersectionTypes(targets);
+                        if (intersectionTypeVariable) {
+                            inferWithPriority(source, intersectionTypeVariable, InferencePriority.NakedTypeVariable);
+                        }
+                        return;
                     }
                     // If the target has a single naked type variable and no inference circularities were
                     // encountered above (meaning we explored the types fully), create a union of the source
@@ -17638,14 +17661,11 @@ namespace ts {
                 // we want to infer string for T, not Promise<string> | string. For intersection types
                 // we only infer to single naked type variables.
                 if (targetFlags & TypeFlags.Intersection ? typeVariableCount === 1 : typeVariableCount > 0) {
-                    const savePriority = priority;
-                    priority |= InferencePriority.NakedTypeVariable;
                     for (const t of targets) {
                         if (getInferenceInfoForType(t)) {
-                            inferFromTypes(source, t);
+                            inferWithPriority(source, t, InferencePriority.NakedTypeVariable);
                         }
                     }
-                    priority = savePriority;
                 }
             }
 
@@ -17666,14 +17686,13 @@ namespace ts {
                     if (inference && !inference.isFixed) {
                         const inferredType = inferTypeForHomomorphicMappedType(source, target, <IndexType>constraintType);
                         if (inferredType) {
-                            const savePriority = priority;
                             // We assign a lower priority to inferences made from types containing non-inferrable
                             // types because we may only have a partial result (i.e. we may have failed to make
                             // reverse inferences for some properties).
-                            priority |= getObjectFlags(source) & ObjectFlags.NonInferrableType ?
-                                InferencePriority.PartialHomomorphicMappedType : InferencePriority.HomomorphicMappedType;
-                            inferFromTypes(inferredType, inference.typeParameter);
-                            priority = savePriority;
+                            inferWithPriority(inferredType, inference.typeParameter,
+                                getObjectFlags(source) & ObjectFlags.NonInferrableType ?
+                                    InferencePriority.PartialHomomorphicMappedType :
+                                    InferencePriority.HomomorphicMappedType);
                         }
                     }
                     return true;
@@ -17681,10 +17700,7 @@ namespace ts {
                 if (constraintType.flags & TypeFlags.TypeParameter) {
                     // We're inferring from some source type S to a mapped type { [P in K]: X }, where K is a type
                     // parameter. First infer from 'keyof S' to K.
-                    const savePriority = priority;
-                    priority |= InferencePriority.MappedTypeConstraint;
-                    inferFromTypes(getIndexType(source), constraintType);
-                    priority = savePriority;
+                    inferWithPriority(getIndexType(source), constraintType, InferencePriority.MappedTypeConstraint);
                     // If K is constrained to a type C, also infer to C. Thus, for a mapped type { [P in K]: X },
                     // where K extends keyof T, we make the same inferences as for a homomorphic mapped type
                     // { [P in keyof T]: X }. This enables us to make meaningful inferences when the target is a
@@ -18770,6 +18786,14 @@ namespace ts {
                 signature.declaration && (getReturnTypeFromAnnotation(signature.declaration) || unknownType).flags & TypeFlags.Never);
         }
 
+        function getTypePredicateArgument(predicate: TypePredicate, callExpression: CallExpression) {
+            if (predicate.kind === TypePredicateKind.Identifier || predicate.kind === TypePredicateKind.AssertsIdentifier) {
+                return callExpression.arguments[predicate.parameterIndex];
+            }
+            const invokedExpression = skipParentheses(callExpression.expression);
+            return isAccessExpression(invokedExpression) ? skipParentheses(invokedExpression.expression) : undefined;
+        }
+
         function reportFlowControlError(node: Node) {
             const block = <Block | ModuleBlock | SourceFile>findAncestor(node, isFunctionOrModuleBlock);
             const sourceFile = getSourceFileOfNode(node);
@@ -19158,20 +19182,30 @@ namespace ts {
                 if (isMatchingReference(reference, expr)) {
                     type = narrowTypeBySwitchOnDiscriminant(type, flow.switchStatement, flow.clauseStart, flow.clauseEnd);
                 }
-                else if (isMatchingReferenceDiscriminant(expr, type)) {
-                    type = narrowTypeByDiscriminant(
-                        type,
-                        expr as AccessExpression,
-                        t => narrowTypeBySwitchOnDiscriminant(t, flow.switchStatement, flow.clauseStart, flow.clauseEnd));
-                }
                 else if (expr.kind === SyntaxKind.TypeOfExpression && isMatchingReference(reference, (expr as TypeOfExpression).expression)) {
                     type = narrowBySwitchOnTypeOf(type, flow.switchStatement, flow.clauseStart, flow.clauseEnd);
                 }
-                else if (containsMatchingReferenceDiscriminant(reference, expr)) {
-                    type = declaredType;
-                }
-                else if (flow.clauseStart === flow.clauseEnd && isExhaustiveSwitchStatement(flow.switchStatement)) {
-                    return unreachableNeverType;
+                else {
+                    if (strictNullChecks) {
+                        if (optionalChainContainsReference(expr, reference)) {
+                            type = narrowTypeBySwitchOptionalChainContainment(type, flow.switchStatement, flow.clauseStart, flow.clauseEnd,
+                                t => !(t.flags & (TypeFlags.Undefined | TypeFlags.Never)));
+                        }
+                        else if (expr.kind === SyntaxKind.TypeOfExpression && optionalChainContainsReference((expr as TypeOfExpression).expression, reference)) {
+                            type = narrowTypeBySwitchOptionalChainContainment(type, flow.switchStatement, flow.clauseStart, flow.clauseEnd,
+                                t => !(t.flags & TypeFlags.Never || t.flags & TypeFlags.StringLiteral && (<StringLiteralType>t).value === "undefined"));
+                        }
+                    }
+                    if (isMatchingReferenceDiscriminant(expr, type)) {
+                        type = narrowTypeByDiscriminant(type, expr as AccessExpression,
+                            t => narrowTypeBySwitchOnDiscriminant(t, flow.switchStatement, flow.clauseStart, flow.clauseEnd));
+                    }
+                    else if (containsMatchingReferenceDiscriminant(reference, expr)) {
+                        type = declaredType;
+                    }
+                    else if (flow.clauseStart === flow.clauseEnd && isExhaustiveSwitchStatement(flow.switchStatement)) {
+                        return unreachableNeverType;
+                    }
                 }
                 return createFlowType(type, isIncomplete(flowType));
             }
@@ -19316,6 +19350,9 @@ namespace ts {
                 if (isMatchingReference(reference, expr)) {
                     return getTypeWithFacts(type, assumeTrue ? TypeFacts.Truthy : TypeFacts.Falsy);
                 }
+                if (strictNullChecks && assumeTrue && optionalChainContainsReference(expr, reference)) {
+                    type = getTypeWithFacts(type, TypeFacts.NEUndefinedOrNull);
+                }
                 if (isMatchingReferenceDiscriminant(expr, declaredType)) {
                     return narrowTypeByDiscriminant(type, <AccessExpression>expr, t => getTypeWithFacts(t, assumeTrue ? TypeFacts.Truthy : TypeFacts.Falsy));
                 }
@@ -19367,12 +19404,12 @@ namespace ts {
                         if (isMatchingReference(reference, right)) {
                             return narrowTypeByEquality(type, operator, left, assumeTrue);
                         }
-                        if (assumeTrue && strictNullChecks) {
+                        if (strictNullChecks) {
                             if (optionalChainContainsReference(left, reference)) {
-                                type = narrowTypeByOptionalChainContainment(type, operator, right);
+                                type = narrowTypeByOptionalChainContainment(type, operator, right, assumeTrue);
                             }
                             else if (optionalChainContainsReference(right, reference)) {
-                                type = narrowTypeByOptionalChainContainment(type, operator, left);
+                                type = narrowTypeByOptionalChainContainment(type, operator, left, assumeTrue);
                             }
                         }
                         if (isMatchingReferenceDiscriminant(left, declaredType)) {
@@ -19399,16 +19436,14 @@ namespace ts {
                 return type;
             }
 
-            function narrowTypeByOptionalChainContainment(type: Type, operator: SyntaxKind, value: Expression): Type {
-                // We are in the true branch of obj?.foo === value or obj?.foo !== value. We remove undefined and null from
+            function narrowTypeByOptionalChainContainment(type: Type, operator: SyntaxKind, value: Expression, assumeTrue: boolean): Type {
+                // We are in a branch of obj?.foo === value or obj?.foo !== value. We remove undefined and null from
                 // the type of obj if (a) the operator is === and the type of value doesn't include undefined or (b) the
                 // operator is !== and the type of value is undefined.
-                const valueType = getTypeOfExpression(value);
-                return operator === SyntaxKind.EqualsEqualsToken && !(getTypeFacts(valueType) & TypeFacts.EQUndefinedOrNull) ||
-                    operator === SyntaxKind.EqualsEqualsEqualsToken && !(getTypeFacts(valueType) & TypeFacts.EQUndefined) ||
-                    operator === SyntaxKind.ExclamationEqualsToken && valueType.flags & TypeFlags.Nullable ||
-                    operator === SyntaxKind.ExclamationEqualsEqualsToken && valueType.flags & TypeFlags.Undefined ?
-                    getTypeWithFacts(type, TypeFacts.NEUndefinedOrNull) : type;
+                const effectiveTrue = operator === SyntaxKind.EqualsEqualsToken || operator === SyntaxKind.EqualsEqualsEqualsToken ? assumeTrue : !assumeTrue;
+                const doubleEquals = operator === SyntaxKind.EqualsEqualsToken || operator === SyntaxKind.ExclamationEqualsToken;
+                const valueNonNullish = !(getTypeFacts(getTypeOfExpression(value)) & (doubleEquals ? TypeFacts.EQUndefinedOrNull : TypeFacts.EQUndefined));
+                return effectiveTrue === valueNonNullish ? getTypeWithFacts(type, TypeFacts.NEUndefinedOrNull) : type;
             }
 
             function narrowTypeByEquality(type: Type, operator: SyntaxKind, value: Expression, assumeTrue: boolean): Type {
@@ -19459,10 +19494,12 @@ namespace ts {
 
             function narrowTypeByTypeof(type: Type, typeOfExpr: TypeOfExpression, operator: SyntaxKind, literal: LiteralExpression, assumeTrue: boolean): Type {
                 // We have '==', '!=', '===', or !==' operator with 'typeof xxx' and string literal operands
+                if (operator === SyntaxKind.ExclamationEqualsToken || operator === SyntaxKind.ExclamationEqualsEqualsToken) {
+                    assumeTrue = !assumeTrue;
+                }
                 const target = getReferenceCandidate(typeOfExpr.expression);
                 if (!isMatchingReference(reference, target)) {
-                    if (assumeTrue && (operator === SyntaxKind.EqualsEqualsToken || operator === SyntaxKind.EqualsEqualsEqualsToken) &&
-                        strictNullChecks && optionalChainContainsReference(target, reference)) {
+                    if (strictNullChecks && optionalChainContainsReference(target, reference) && assumeTrue === (literal.text !== "undefined")) {
                         return getTypeWithFacts(type, TypeFacts.NEUndefinedOrNull);
                     }
                     // For a reference of the form 'x.y', a 'typeof x === ...' type guard resets the
@@ -19471,9 +19508,6 @@ namespace ts {
                         return declaredType;
                     }
                     return type;
-                }
-                if (operator === SyntaxKind.ExclamationEqualsToken || operator === SyntaxKind.ExclamationEqualsEqualsToken) {
-                    assumeTrue = !assumeTrue;
                 }
                 if (type.flags & TypeFlags.Any && literal.text === "function") {
                     return type;
@@ -19507,6 +19541,11 @@ namespace ts {
                     }
                     return type;
                 }
+            }
+
+            function narrowTypeBySwitchOptionalChainContainment(type: Type, switchStatement: SwitchStatement, clauseStart: number, clauseEnd: number, clauseCheck: (type: Type) => boolean) {
+                const everyClauseChecks = clauseStart !== clauseEnd && every(getSwitchClauseTypes(switchStatement).slice(clauseStart, clauseEnd), clauseCheck);
+                return everyClauseChecks ? getTypeWithFacts(type, TypeFacts.NEUndefinedOrNull) : type;
             }
 
             function narrowTypeBySwitchOnDiscriminant(type: Type, switchStatement: SwitchStatement, clauseStart: number, clauseEnd: number) {
@@ -19729,28 +19768,17 @@ namespace ts {
 
             function narrowTypeByTypePredicate(type: Type, predicate: TypePredicate, callExpression: CallExpression, assumeTrue: boolean): Type {
                 // Don't narrow from 'any' if the predicate type is exactly 'Object' or 'Function'
-                if (isTypeAny(type) && (predicate.type === globalObjectType || predicate.type === globalFunctionType)) {
-                    return type;
-                }
-                if (predicate.kind === TypePredicateKind.Identifier || predicate.kind === TypePredicateKind.AssertsIdentifier) {
-                    const predicateArgument = callExpression.arguments[predicate.parameterIndex];
-                    if (predicateArgument && predicate.type) {
+                if (predicate.type && !(isTypeAny(type) && (predicate.type === globalObjectType || predicate.type === globalFunctionType))) {
+                    const predicateArgument = getTypePredicateArgument(predicate, callExpression);
+                    if (predicateArgument) {
                         if (isMatchingReference(reference, predicateArgument)) {
                             return getNarrowedType(type, predicate.type, assumeTrue, isTypeSubtypeOf);
                         }
+                        if (strictNullChecks && assumeTrue && optionalChainContainsReference(predicateArgument, reference) &&
+                            !(getTypeFacts(predicate.type) & TypeFacts.EQUndefined)) {
+                            return getTypeWithFacts(type, TypeFacts.NEUndefinedOrNull);
+                        }
                         if (containsMatchingReference(reference, predicateArgument)) {
-                            return declaredType;
-                        }
-                    }
-                }
-                else {
-                    const invokedExpression = skipParentheses(callExpression.expression);
-                    if (isAccessExpression(invokedExpression) && predicate.type) {
-                        const possibleReference = skipParentheses(invokedExpression.expression);
-                        if (isMatchingReference(reference, possibleReference)) {
-                            return getNarrowedType(type, predicate.type, assumeTrue, isTypeSubtypeOf);
-                        }
-                        if (containsMatchingReference(reference, possibleReference)) {
                             return declaredType;
                         }
                     }
