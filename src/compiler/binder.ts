@@ -1,3 +1,4 @@
+
 /* @internal */
 namespace ts {
     export const enum ModuleInstanceState {
@@ -951,11 +952,10 @@ namespace ts {
             if (!expression) {
                 return flags & FlowFlags.TrueCondition ? antecedent : unreachableFlow;
             }
-            if (expression.kind === SyntaxKind.TrueKeyword && flags & FlowFlags.FalseCondition ||
-                expression.kind === SyntaxKind.FalseKeyword && flags & FlowFlags.TrueCondition) {
-                if (!isExpressionOfOptionalChainRoot(expression)) {
-                    return unreachableFlow;
-                }
+            if ((expression.kind === SyntaxKind.TrueKeyword && flags & FlowFlags.FalseCondition ||
+                expression.kind === SyntaxKind.FalseKeyword && flags & FlowFlags.TrueCondition) &&
+                !isExpressionOfOptionalChainRoot(expression) && !isNullishCoalesce(expression.parent)) {
+                return unreachableFlow;
             }
             if (!isNarrowingExpression(expression)) {
                 return antecedent;
@@ -2003,7 +2003,12 @@ namespace ts {
                         switch (getAssignmentDeclarationPropertyAccessKind(declName.parent)) {
                             case AssignmentDeclarationKind.ExportsProperty:
                             case AssignmentDeclarationKind.ModuleExports:
-                                container = file;
+                                if (!isExternalOrCommonJsModule(file)) {
+                                    container = undefined!;
+                                }
+                                else {
+                                    container = file;
+                                }
                                 break;
                             case AssignmentDeclarationKind.ThisProperty:
                                 container = declName.parent.expression;
@@ -2017,7 +2022,9 @@ namespace ts {
                             case AssignmentDeclarationKind.None:
                                 return Debug.fail("Shouldn't have detected typedef or enum on non-assignment declaration");
                         }
-                        declareModuleMember(typeAlias, SymbolFlags.TypeAlias, SymbolFlags.TypeAliasExcludes);
+                        if (container) {
+                            declareModuleMember(typeAlias, SymbolFlags.TypeAlias, SymbolFlags.TypeAliasExcludes);
+                        }
                         container = oldContainer;
                     }
                 }

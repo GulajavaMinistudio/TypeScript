@@ -319,6 +319,7 @@ namespace ts {
 
         const globalThisSymbol = createSymbol(SymbolFlags.Module, "globalThis" as __String, CheckFlags.Readonly);
         globalThisSymbol.exports = globals;
+        globalThisSymbol.declarations = [];
         globals.set(globalThisSymbol.escapedName, globalThisSymbol);
 
         const argumentsSymbol = createSymbol(SymbolFlags.Property, "arguments" as __String);
@@ -2629,7 +2630,12 @@ namespace ts {
                 return undefined;
             }
             const init = isVariableDeclaration(decl) ? getDeclaredExpandoInitializer(decl) : getAssignedExpandoInitializer(decl);
-            return init && getSymbolOfNode(init) || undefined;
+            if (init) {
+                const initSymbol = getSymbolOfNode(init);
+                if (initSymbol) {
+                    return mergeJSSymbols(initSymbol, symbol);
+                }
+            }
         }
 
 
@@ -4087,8 +4093,6 @@ namespace ts {
                     else if (context.flags & NodeBuilderFlags.WriteClassExpressionAsTypeLiteral &&
                         type.symbol.valueDeclaration &&
                         isClassLike(type.symbol.valueDeclaration) &&
-                        // Use `import` types for refs to other scopes, only anonymize something defined in the same scope
-                        findAncestor(type.symbol.valueDeclaration, d => d === getSourceFileOfNode(context.enclosingDeclaration)) &&
                         !isValueSymbolAccessible(type.symbol, context.enclosingDeclaration)
                     ) {
                         return createAnonymousTypeNode(type);
@@ -10754,7 +10758,7 @@ namespace ts {
         /**
          * A JSdoc TypeReference may be to a value, but resolve it as a type anyway.
          * Note: If the value is imported from commonjs, it should really be an alias,
-         * but this function fakes special-case code fakes alias resolution as well.
+         * but this function's special-case code fakes alias resolution as well.
          */
         function getTypeFromJSDocValueReference(node: NodeWithTypeArguments, symbol: Symbol): Type | undefined {
             const valueType = getTypeOfSymbol(symbol);
@@ -10766,7 +10770,7 @@ namespace ts {
                     && isCallExpression(decl.initializer)
                     && isRequireCall(decl.initializer, /*requireStringLiteralLikeArgument*/ true)
                     && valueType.symbol;
-                if (isRequireAlias) {
+                if (isRequireAlias || node.kind === SyntaxKind.ImportType) {
                     typeType = getTypeReferenceType(node, valueType.symbol);
                 }
             }
@@ -24995,7 +24999,7 @@ namespace ts {
         }
 
         function mergeJSSymbols(target: Symbol, source: Symbol | undefined) {
-            if (source && (hasEntries(source.exports) || hasEntries(source.members))) {
+            if (source) {
                 const links = getSymbolLinks(source);
                 if (!links.inferredClassSymbol || !links.inferredClassSymbol.has("" + getSymbolId(target))) {
                     const inferred = isTransientSymbol(target) ? target : cloneSymbol(target) as TransientSymbol;
@@ -27462,7 +27466,7 @@ namespace ts {
                 (node.parent.kind === SyntaxKind.ElementAccessExpression && (<ElementAccessExpression>node.parent).expression === node) ||
                 ((node.kind === SyntaxKind.Identifier || node.kind === SyntaxKind.QualifiedName) && isInRightSideOfImportOrExportAssignment(<Identifier>node) ||
                     (node.parent.kind === SyntaxKind.TypeQuery && (<TypeQueryNode>node.parent).exprName === node)) ||
-                (node.parent.kind === SyntaxKind.ExportSpecifier && (compilerOptions.preserveConstEnums || node.flags & NodeFlags.Ambient)); // We allow reexporting const enums
+                (node.parent.kind === SyntaxKind.ExportSpecifier); // We allow reexporting const enums
 
             if (!ok) {
                 error(node, Diagnostics.const_enums_can_only_be_used_in_property_or_index_access_expressions_or_the_right_hand_side_of_an_import_declaration_or_export_assignment_or_type_query);
