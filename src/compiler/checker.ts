@@ -6657,7 +6657,9 @@ namespace ts {
             }
             const stringIndexInfo = getIndexInfoOfType(source, IndexKind.String);
             const numberIndexInfo = getIndexInfoOfType(source, IndexKind.Number);
-            return createAnonymousType(symbol, members, emptyArray, emptyArray, stringIndexInfo, numberIndexInfo);
+            const result = createAnonymousType(symbol, members, emptyArray, emptyArray, stringIndexInfo, numberIndexInfo);
+            result.objectFlags |= ObjectFlags.ObjectRestType;
+            return result;
         }
 
         // Determine the control flow type associated with a destructuring declaration or assignment. The following
@@ -17240,7 +17242,7 @@ namespace ts {
             return !!(type.flags & TypeFlags.Instantiable ||
                 objectFlags & ObjectFlags.Reference && ((<TypeReference>type).node || forEach(getTypeArguments(<TypeReference>type), couldContainTypeVariables)) ||
                 objectFlags & ObjectFlags.Anonymous && type.symbol && type.symbol.flags & (SymbolFlags.Function | SymbolFlags.Method | SymbolFlags.Class | SymbolFlags.TypeLiteral | SymbolFlags.ObjectLiteral) && type.symbol.declarations ||
-                objectFlags & ObjectFlags.Mapped ||
+                objectFlags & (ObjectFlags.Mapped | ObjectFlags.ObjectRestType) ||
                 type.flags & TypeFlags.UnionOrIntersection && !(type.flags & TypeFlags.EnumLiteral) && couldUnionOrIntersectionContainTypeVariables(<UnionOrIntersectionType>type));
         }
 
@@ -20190,7 +20192,26 @@ namespace ts {
                 }
             }
             else if (!assumeInitialized && !(getFalsyFlags(type) & TypeFlags.Undefined) && getFalsyFlags(flowType) & TypeFlags.Undefined) {
-                error(node, Diagnostics.Variable_0_is_used_before_being_assigned, symbolToString(symbol));
+                const diag = error(node, Diagnostics.Variable_0_is_used_before_being_assigned, symbolToString(symbol));
+
+                // See GH:32846 - if the user is using a variable whose type is () => T1 | ... | undefined
+                // they may have meant to specify the type as (() => T1 | ...) | undefined
+                // This is assumed if: the type is a FunctionType, the return type is a Union, the last constituent of
+                // the union is `undefined`
+                if (type.symbol && type.symbol.declarations.length === 1 && isFunctionTypeNode(type.symbol.declarations[0])) {
+                    const funcTypeNode = <FunctionTypeNode>type.symbol.declarations[0];
+                    const returnType = getReturnTypeFromAnnotation(funcTypeNode);
+                    if (returnType && returnType.flags & TypeFlags.Union) {
+                        const unionTypes = (<UnionTypeNode>funcTypeNode.type).types;
+                        if (unionTypes && unionTypes[unionTypes.length - 1].kind === SyntaxKind.UndefinedKeyword) {
+                            const parenedFuncType = getMutableClone(funcTypeNode);
+                            // Highlight to the end of the second to last constituent of the union
+                            parenedFuncType.end = unionTypes[unionTypes.length - 2].end;
+                            addRelatedInfo(diag, createDiagnosticForNode(parenedFuncType, Diagnostics.Did_you_mean_to_parenthesize_this_function_type));
+                        }
+                    }
+                }
+
                 // Return the declared type to reduce follow-on errors
                 return type;
             }
@@ -31813,11 +31834,14 @@ namespace ts {
                             // same when the derived property is from an assignment
                             continue;
                         }
-                        if (basePropertyFlags !== SymbolFlags.Property && derivedPropertyFlags === SymbolFlags.Property) {
-                            errorMessage = Diagnostics.Class_0_defines_instance_member_accessor_1_but_extended_class_2_defines_it_as_instance_member_property;
-                        }
-                        else if (basePropertyFlags === SymbolFlags.Property && derivedPropertyFlags !== SymbolFlags.Property) {
-                            errorMessage = Diagnostics.Class_0_defines_instance_member_property_1_but_extended_class_2_defines_it_as_instance_member_accessor;
+
+                        const overriddenInstanceProperty = basePropertyFlags !== SymbolFlags.Property && derivedPropertyFlags === SymbolFlags.Property;
+                        const overriddenInstanceAccessor = basePropertyFlags === SymbolFlags.Property && derivedPropertyFlags !== SymbolFlags.Property;
+                        if (overriddenInstanceProperty || overriddenInstanceAccessor) {
+                            const errorMessage = overriddenInstanceProperty ?
+                                Diagnostics._0_is_defined_as_an_accessor_in_class_1_but_is_overridden_here_in_2_as_an_instance_property :
+                                Diagnostics._0_is_defined_as_a_property_in_class_1_but_is_overridden_here_in_2_as_an_accessor;
+                            error(getNameOfDeclaration(derived.valueDeclaration) || derived.valueDeclaration, errorMessage, symbolToString(base), typeToString(baseType), typeToString(type));
                         }
                         else {
                             const uninitialized = find(derived.declarations, d => d.kind === SyntaxKind.PropertyDeclaration && !(d as PropertyDeclaration).initializer);
@@ -31837,9 +31861,10 @@ namespace ts {
                                     error(getNameOfDeclaration(derived.valueDeclaration) || derived.valueDeclaration, errorMessage, symbolToString(base), typeToString(baseType));
                                 }
                             }
-                            // correct case
-                            continue;
                         }
+
+                        // correct case
+                        continue;
                     }
                     else if (isPrototypeProperty(base)) {
                         if (isPrototypeProperty(derived) || derived.flags & SymbolFlags.Property) {
