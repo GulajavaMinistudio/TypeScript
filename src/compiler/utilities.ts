@@ -4244,9 +4244,12 @@ namespace ts {
 
     export function tryGetPropertyAccessOrIdentifierToString(expr: Expression): string | undefined {
         if (isPropertyAccessExpression(expr)) {
-            return tryGetPropertyAccessOrIdentifierToString(expr.expression) + "." + expr.name;
+            const baseStr = tryGetPropertyAccessOrIdentifierToString(expr.expression);
+            if (baseStr !== undefined) {
+                return baseStr + "." + expr.name;
+            }
         }
-        if (isIdentifier(expr)) {
+        else if (isIdentifier(expr)) {
             return unescapeLeadingUnderscores(expr.escapedText);
         }
         return undefined;
@@ -8282,6 +8285,7 @@ namespace ts {
     export function matchPatternOrExact(patternStrings: readonly string[], candidate: string): string | Pattern | undefined {
         const patterns: Pattern[] = [];
         for (const patternString of patternStrings) {
+            if (!hasZeroOrOneAsteriskCharacter(patternString)) continue;
             const pattern = tryParsePattern(patternString);
             if (pattern) {
                 patterns.push(pattern);
