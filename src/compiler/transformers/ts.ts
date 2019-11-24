@@ -900,13 +900,13 @@ namespace ts {
             if (parametersWithPropertyAssignments) {
                 for (const parameter of parametersWithPropertyAssignments) {
                     if (isIdentifier(parameter.name)) {
-                        members.push(aggregateTransformFlags(createProperty(
+                        members.push(setOriginalNode(aggregateTransformFlags(createProperty(
                             /*decorators*/ undefined,
                             /*modifiers*/ undefined,
                             parameter.name,
                             /*questionOrExclamationToken*/ undefined,
                             /*type*/ undefined,
-                            /*initializer*/ undefined)));
+                            /*initializer*/ undefined)), parameter));
                     }
                 }
             }
@@ -1873,6 +1873,9 @@ namespace ts {
         }
 
         function visitPropertyDeclaration(node: PropertyDeclaration) {
+            if (node.flags & NodeFlags.Ambient) {
+                return undefined;
+            }
             const updated = updateProperty(
                 node,
                 /*decorators*/ undefined,

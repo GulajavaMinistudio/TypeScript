@@ -12524,6 +12524,61 @@ namespace ts {
             return !!(type.flags & TypeFlags.Object) && !isGenericMappedType(type);
         }
 
+        function isEmptyObjectTypeOrSpreadsIntoEmptyObject(type: Type) {
+            return isEmptyObjectType(type) || !!(type.flags & (TypeFlags.Null | TypeFlags.Undefined | TypeFlags.BooleanLike | TypeFlags.NumberLike | TypeFlags.BigIntLike | TypeFlags.StringLike | TypeFlags.EnumLike | TypeFlags.NonPrimitive | TypeFlags.Index));
+        }
+
+        function isSinglePropertyAnonymousObjectType(type: Type) {
+            return !!(type.flags & TypeFlags.Object) &&
+                !!(getObjectFlags(type) & ObjectFlags.Anonymous) &&
+                (length(getPropertiesOfType(type)) === 1 || every(getPropertiesOfType(type), p => !!(p.flags & SymbolFlags.Optional)));
+        }
+
+        function tryMergeUnionOfObjectTypeAndEmptyObject(type: UnionType, readonly: boolean): Type | undefined {
+            if (type.types.length === 2) {
+                const firstType = type.types[0];
+                const secondType = type.types[1];
+                if (every(type.types, isEmptyObjectTypeOrSpreadsIntoEmptyObject)) {
+                    return isEmptyObjectType(firstType) ? firstType : isEmptyObjectType(secondType) ? secondType : emptyObjectType;
+                }
+                if (isEmptyObjectTypeOrSpreadsIntoEmptyObject(firstType) && isSinglePropertyAnonymousObjectType(secondType)) {
+                    return getAnonymousPartialType(secondType);
+                }
+                if (isEmptyObjectTypeOrSpreadsIntoEmptyObject(secondType) && isSinglePropertyAnonymousObjectType(firstType)) {
+                    return getAnonymousPartialType(firstType);
+                }
+            }
+
+            function getAnonymousPartialType(type: Type) {
+                // gets the type as if it had been spread, but where everything in the spread is made optional
+                const members = createSymbolTable();
+                for (const prop of getPropertiesOfType(type)) {
+                    if (getDeclarationModifierFlagsFromSymbol(prop) & (ModifierFlags.Private | ModifierFlags.Protected)) {
+                        // do nothing, skip privates
+                    }
+                    else if (isSpreadableProperty(prop)) {
+                        const isSetonlyAccessor = prop.flags & SymbolFlags.SetAccessor && !(prop.flags & SymbolFlags.GetAccessor);
+                        const flags = SymbolFlags.Property | SymbolFlags.Optional;
+                        const result = createSymbol(flags, prop.escapedName, readonly ? CheckFlags.Readonly : 0);
+                        result.type = isSetonlyAccessor ? undefinedType : getTypeOfSymbol(prop);
+                        result.declarations = prop.declarations;
+                        result.nameType = prop.nameType;
+                        result.syntheticOrigin = prop;
+                        members.set(prop.escapedName, result);
+                    }
+                }
+                const spread = createAnonymousType(
+                    type.symbol,
+                    members,
+                    emptyArray,
+                    emptyArray,
+                    getIndexInfoOfType(type, IndexKind.String),
+                    getIndexInfoOfType(type, IndexKind.Number));
+                spread.objectFlags |= ObjectFlags.ObjectLiteral | ObjectFlags.ContainsObjectOrArrayLiteral;
+                return spread;
+            }
+        }
+
         /**
          * Since the source of spread types are object literals, which are not binary,
          * this function should be called in a left folding style, with left = previous result of getSpreadType
@@ -12543,9 +12598,17 @@ namespace ts {
                 return left;
             }
             if (left.flags & TypeFlags.Union) {
+                const merged = tryMergeUnionOfObjectTypeAndEmptyObject(left as UnionType, readonly);
+                if (merged) {
+                    return getSpreadType(merged, right, symbol, objectFlags, readonly);
+                }
                 return mapType(left, t => getSpreadType(t, right, symbol, objectFlags, readonly));
             }
             if (right.flags & TypeFlags.Union) {
+                const merged = tryMergeUnionOfObjectTypeAndEmptyObject(right as UnionType, readonly);
+                if (merged) {
+                    return getSpreadType(left, merged, symbol, objectFlags, readonly);
+                }
                 return mapType(right, t => getSpreadType(left, t, symbol, objectFlags, readonly));
             }
             if (right.flags & (TypeFlags.BooleanLike | TypeFlags.NumberLike | TypeFlags.BigIntLike | TypeFlags.StringLike | TypeFlags.EnumLike | TypeFlags.NonPrimitive | TypeFlags.Index)) {
@@ -14250,6 +14313,14 @@ namespace ts {
             return getObjectFlags(source) & ObjectFlags.JsxAttributes && !isUnhyphenatedJsxName(sourceProp.escapedName);
         }
 
+        function getNormalizedType(type: Type, writing: boolean): Type {
+            return isFreshLiteralType(type) ? (<FreshableType>type).regularType :
+                getObjectFlags(type) & ObjectFlags.Reference && (<TypeReference>type).node ? createTypeReference((<TypeReference>type).target, getTypeArguments(<TypeReference>type)) :
+                type.flags & TypeFlags.Substitution ? writing ? (<SubstitutionType>type).typeVariable : (<SubstitutionType>type).substitute :
+                type.flags & TypeFlags.Simplifiable ? getSimplifiedType(type, writing) :
+                type;
+        }
+
         /**
          * Checks if 'source' is related to 'target' (e.g.: is a assignable to).
          * @param source The left-hand-side of the relation.
@@ -14555,25 +14626,13 @@ namespace ts {
              * * Ternary.Maybe if they are related with assumptions of other relationships, or
              * * Ternary.False if they are not related.
              */
-            function isRelatedTo(source: Type, target: Type, reportErrors = false, headMessage?: DiagnosticMessage, isApparentIntersectionConstituent?: boolean): Ternary {
-                if (isFreshLiteralType(source)) {
-                    source = (<FreshableType>source).regularType;
-                }
-                if (isFreshLiteralType(target)) {
-                    target = (<FreshableType>target).regularType;
-                }
-                if (source.flags & TypeFlags.Substitution) {
-                    source = (<SubstitutionType>source).substitute;
-                }
-                if (target.flags & TypeFlags.Substitution) {
-                    target = (<SubstitutionType>target).typeVariable;
-                }
-                if (source.flags & TypeFlags.Simplifiable) {
-                    source = getSimplifiedType(source, /*writing*/ false);
-                }
-                if (target.flags & TypeFlags.Simplifiable) {
-                    target = getSimplifiedType(target, /*writing*/ true);
-                }
+            function isRelatedTo(originalSource: Type, originalTarget: Type, reportErrors = false, headMessage?: DiagnosticMessage, isApparentIntersectionConstituent?: boolean): Ternary {
+                // Normalize the source and target types: Turn fresh literal types into regular literal types,
+                // turn deferred type references into regular type references, simplify indexed access and
+                // conditional types, and resolve substitution types to either the substitution (on the source
+                // side) or the type variable (on the target side).
+                let source = getNormalizedType(originalSource, /*writing*/ false);
+                let target = getNormalizedType(originalTarget, /*writing*/ true);
 
                 // Try to see if we're relating something like `Foo` -> `Bar | null | undefined`.
                 // If so, reporting the `null` and `undefined` in the type is hardly useful.
@@ -14706,6 +14765,8 @@ namespace ts {
                 }
 
                 if (!result && reportErrors) {
+                    source = originalSource.aliasSymbol ? originalSource : source;
+                    target = originalTarget.aliasSymbol ? originalTarget : target;
                     let maybeSuppress = overrideNextErrorInfo > 0;
                     if (maybeSuppress) {
                         overrideNextErrorInfo--;
