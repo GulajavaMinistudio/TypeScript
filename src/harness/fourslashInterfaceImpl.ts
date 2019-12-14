@@ -434,6 +434,10 @@ namespace FourSlashInterface {
             this.state.verifyImportFixAtPosition(expectedTextArray, errorCode, preferences);
         }
 
+        public importFixModuleSpecifiers(marker: string, moduleSpecifiers: string[]) {
+            this.state.verifyImportFixModuleSpecifiers(marker, moduleSpecifiers);
+        }
+
         public navigationBar(json: any, options?: { checkSpans?: boolean }) {
             this.state.verifyNavigationBar(json, options);
         }
@@ -462,7 +466,7 @@ namespace FourSlashInterface {
             this.state.verifyRangesWithSameTextAreRenameLocations(...texts);
         }
 
-        public rangesAreRenameLocations(options?: FourSlash.Range[] | { findInStrings?: boolean, findInComments?: boolean, ranges?: FourSlash.Range[] }) {
+        public rangesAreRenameLocations(options?: FourSlash.Range[] | { findInStrings?: boolean, findInComments?: boolean, ranges?: FourSlash.Range[], providePrefixAndSuffixTextForRename?: boolean }) {
             this.state.verifyRangesAreRenameLocations(options);
         }
 
