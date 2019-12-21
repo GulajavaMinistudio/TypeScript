@@ -390,6 +390,8 @@ namespace ts {
 
             case SyntaxKind.NamespaceImport:
                 return visitNode(cbNode, (<NamespaceImport>node).name);
+            case SyntaxKind.NamespaceExport:
+                return visitNode(cbNode, (<NamespaceExport>node).name);
             case SyntaxKind.NamedImports:
             case SyntaxKind.NamedExports:
                 return visitNodes(cbNode, cbNodes, (<NamedImportsOrExports>node).elements);
@@ -509,6 +511,7 @@ namespace ts {
             case SyntaxKind.JSDocPublicTag:
             case SyntaxKind.JSDocPrivateTag:
             case SyntaxKind.JSDocProtectedTag:
+            case SyntaxKind.JSDocReadonlyTag:
                 return visitNode(cbNode, (node as JSDocTag).tagName);
             case SyntaxKind.PartiallyEmittedExpression:
                 return visitNode(cbNode, (<PartiallyEmittedExpression>node).expression);
@@ -6469,9 +6472,18 @@ namespace ts {
             return finishNode(node);
         }
 
+        function parseNamespaceExport(): NamespaceExport {
+            const node = <NamespaceExport>createNode(SyntaxKind.NamespaceExport);
+            node.name = parseIdentifier();
+            return finishNode(node);
+        }
+
         function parseExportDeclaration(node: ExportDeclaration): ExportDeclaration {
             node.kind = SyntaxKind.ExportDeclaration;
             if (parseOptional(SyntaxKind.AsteriskToken)) {
+                if (parseOptional(SyntaxKind.AsKeyword)) {
+                    node.exportClause = parseNamespaceExport();
+                }
                 parseExpected(SyntaxKind.FromKeyword);
                 node.moduleSpecifier = parseModuleSpecifier();
             }
@@ -6844,6 +6856,9 @@ namespace ts {
                             break;
                         case "protected":
                             tag = parseSimpleTag(start, SyntaxKind.JSDocProtectedTag, tagName);
+                            break;
+                        case "readonly":
+                            tag = parseSimpleTag(start, SyntaxKind.JSDocReadonlyTag, tagName);
                             break;
                         case "this":
                             tag = parseThisTag(start, tagName);

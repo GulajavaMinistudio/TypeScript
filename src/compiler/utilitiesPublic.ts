@@ -688,6 +688,11 @@ namespace ts {
         return getFirstJSDocTag(node, isJSDocProtectedTag);
     }
 
+    /** Gets the JSDoc protected tag for the node if present */
+    export function getJSDocReadonlyTag(node: Node): JSDocReadonlyTag | undefined {
+        return getFirstJSDocTag(node, isJSDocReadonlyTag);
+    }
+
     /** Gets the JSDoc enum tag for the node if present */
     export function getJSDocEnumTag(node: Node): JSDocEnumTag | undefined {
         return getFirstJSDocTag(node, isJSDocEnumTag);
@@ -1361,6 +1366,14 @@ namespace ts {
         return node.kind === SyntaxKind.NamespaceImport;
     }
 
+    export function isNamespaceExport(node: Node): node is NamespaceExport {
+        return node.kind === SyntaxKind.NamespaceExport;
+    }
+
+    export function isNamedExportBindings(node: Node): node is NamedExportBindings {
+        return node.kind === SyntaxKind.NamespaceExport || node.kind === SyntaxKind.NamedExports;
+    }
+
     export function isNamedImports(node: Node): node is NamedImports {
         return node.kind === SyntaxKind.NamedImports;
     }
@@ -1572,6 +1585,10 @@ namespace ts {
 
     export function isJSDocProtectedTag(node: Node): node is JSDocProtectedTag {
         return node.kind === SyntaxKind.JSDocProtectedTag;
+    }
+
+    export function isJSDocReadonlyTag(node: Node): node is JSDocReadonlyTag {
+        return node.kind === SyntaxKind.JSDocReadonlyTag;
     }
 
     export function isJSDocEnumTag(node: Node): node is JSDocEnumTag {
@@ -2254,6 +2271,7 @@ namespace ts {
             || kind === SyntaxKind.ModuleDeclaration
             || kind === SyntaxKind.NamespaceExportDeclaration
             || kind === SyntaxKind.NamespaceImport
+            || kind === SyntaxKind.NamespaceExport
             || kind === SyntaxKind.Parameter
             || kind === SyntaxKind.PropertyAssignment
             || kind === SyntaxKind.PropertyDeclaration

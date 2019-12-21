@@ -403,6 +403,7 @@ namespace ts {
         ExportAssignment,
         ExportDeclaration,
         NamedExports,
+        NamespaceExport,
         ExportSpecifier,
         MissingDeclaration,
 
@@ -471,6 +472,7 @@ namespace ts {
         JSDocPublicTag,
         JSDocPrivateTag,
         JSDocProtectedTag,
+        JSDocReadonlyTag,
         JSDocCallbackTag,
         JSDocEnumTag,
         JSDocParameterTag,
@@ -2441,6 +2443,7 @@ namespace ts {
     }
 
     export type NamedImportBindings = NamespaceImport | NamedImports;
+    export type NamedExportBindings = NamespaceExport | NamedExports;
 
     // In case of:
     // import d from "mod" => name = d, namedBinding = undefined
@@ -2461,6 +2464,12 @@ namespace ts {
         name: Identifier;
     }
 
+    export interface NamespaceExport extends NamedDeclaration {
+        kind: SyntaxKind.NamespaceExport;
+        parent: ExportDeclaration;
+        name: Identifier
+    }
+
     export interface NamespaceExportDeclaration extends DeclarationStatement {
         kind: SyntaxKind.NamespaceExportDeclaration;
         name: Identifier;
@@ -2470,7 +2479,7 @@ namespace ts {
         kind: SyntaxKind.ExportDeclaration;
         parent: SourceFile | ModuleBlock;
         /** Will not be assigned in the case of `export * from "foo";` */
-        exportClause?: NamedExports;
+        exportClause?: NamedExportBindings;
         /** If this is not a StringLiteral it will be a grammar error. */
         moduleSpecifier?: Expression;
     }
@@ -2630,6 +2639,10 @@ namespace ts {
 
     export interface JSDocProtectedTag extends JSDocTag {
         kind: SyntaxKind.JSDocProtectedTag;
+    }
+
+    export interface JSDocReadonlyTag extends JSDocTag {
+        kind: SyntaxKind.JSDocReadonlyTag;
     }
 
     export interface JSDocEnumTag extends JSDocTag, Declaration {
@@ -3131,6 +3144,8 @@ namespace ts {
         getMissingFilePaths(): readonly Path[];
         /* @internal */
         getRefFileMap(): MultiMap<RefFile> | undefined;
+        /* @internal */
+        getFilesByNameMap(): Map<SourceFile | false | undefined>;
 
         /**
          * Emits the JavaScript and declaration files.  If targetSourceFile is not specified, then
@@ -3176,7 +3191,7 @@ namespace ts {
         getIdentifierCount(): number;
         getSymbolCount(): number;
         getTypeCount(): number;
-        getRelationCacheSizes(): { assignable: number, identity: number, subtype: number };
+        getRelationCacheSizes(): { assignable: number, identity: number, subtype: number, strictSubtype: number };
 
         /* @internal */ getFileProcessingDiagnostics(): DiagnosticCollection;
         /* @internal */ getResolvedTypeReferenceDirectives(): Map<ResolvedTypeReferenceDirective | undefined>;
@@ -3494,7 +3509,7 @@ namespace ts {
         /* @internal */ getIdentifierCount(): number;
         /* @internal */ getSymbolCount(): number;
         /* @internal */ getTypeCount(): number;
-        /* @internal */ getRelationCacheSizes(): { assignable: number, identity: number, subtype: number };
+        /* @internal */ getRelationCacheSizes(): { assignable: number, identity: number, subtype: number, strictSubtype: number };
 
         /* @internal */ isArrayType(type: Type): boolean;
         /* @internal */ isTupleType(type: Type): boolean;
@@ -5110,6 +5125,7 @@ namespace ts {
         //       Non-ES module kinds should not come between ES2015 (the earliest ES module kind) and ESNext (the last ES
         //       module kind).
         ES2015 = 5,
+        ES2020 = 6,
         ESNext = 99
     }
 

@@ -2237,14 +2237,14 @@ namespace ts {
         }
     }
 
-    export function getNamespaceDeclarationNode(node: ImportDeclaration | ImportEqualsDeclaration | ExportDeclaration): ImportEqualsDeclaration | NamespaceImport | undefined {
+    export function getNamespaceDeclarationNode(node: ImportDeclaration | ImportEqualsDeclaration | ExportDeclaration): ImportEqualsDeclaration | NamespaceImport | NamespaceExport | undefined {
         switch (node.kind) {
             case SyntaxKind.ImportDeclaration:
                 return node.importClause && tryCast(node.importClause.namedBindings, isNamespaceImport);
             case SyntaxKind.ImportEqualsDeclaration:
                 return node;
             case SyntaxKind.ExportDeclaration:
-                return undefined;
+                return node.exportClause && tryCast(node.exportClause, isNamespaceExport);
             default:
                 return Debug.assertNever(node);
         }
@@ -2681,6 +2681,7 @@ namespace ts {
     // import * as <symbol> from ...
     // import { x as <symbol> } from ...
     // export { x as <symbol> } from ...
+    // export * as ns <symbol> from ...
     // export = <EntityNameExpression>
     // export default <EntityNameExpression>
     // module.exports = <EntityNameExpression>
@@ -2691,6 +2692,7 @@ namespace ts {
             node.kind === SyntaxKind.NamespaceExportDeclaration ||
             node.kind === SyntaxKind.ImportClause && !!(<ImportClause>node).name ||
             node.kind === SyntaxKind.NamespaceImport ||
+            node.kind === SyntaxKind.NamespaceExport ||
             node.kind === SyntaxKind.ImportSpecifier ||
             node.kind === SyntaxKind.ExportSpecifier ||
             node.kind === SyntaxKind.ExportAssignment && exportAssignmentIsAlias(<ExportAssignment>node) ||
@@ -4130,7 +4132,8 @@ namespace ts {
             // or when !(node.flags & NodeFlags.Synthesized) && node.kind !== SyntaxKind.SourceFile)
             const tags = (getJSDocPublicTag(node) ? ModifierFlags.Public : ModifierFlags.None)
                 | (getJSDocPrivateTag(node) ? ModifierFlags.Private : ModifierFlags.None)
-                | (getJSDocProtectedTag(node) ? ModifierFlags.Protected : ModifierFlags.None);
+                | (getJSDocProtectedTag(node) ? ModifierFlags.Protected : ModifierFlags.None)
+                | (getJSDocReadonlyTag(node) ? ModifierFlags.Readonly : ModifierFlags.None);
             flags |= tags;
         }
 
@@ -5181,6 +5184,7 @@ namespace ts {
             case ModuleKind.CommonJS:
             case ModuleKind.AMD:
             case ModuleKind.ES2015:
+            case ModuleKind.ES2020:
             case ModuleKind.ESNext:
                 return true;
             default:
