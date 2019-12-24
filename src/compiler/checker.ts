@@ -21213,13 +21213,13 @@ namespace ts {
         function getContextualTypeForArgumentAtIndex(callTarget: CallLikeExpression, argIndex: number, contextFlags?: ContextFlags): Type {
             // If we're already in the process of resolving the given signature, don't resolve again as
             // that could cause infinite recursion. Instead, return anySignature.
-            const signature = getNodeLinks(callTarget).resolvedSignature === resolvingSignature ? resolvingSignature : getResolvedSignature(callTarget);
+            let signature = getNodeLinks(callTarget).resolvedSignature === resolvingSignature ? resolvingSignature : getResolvedSignature(callTarget);
+            if (contextFlags && contextFlags & ContextFlags.BaseConstraint && signature.target && !hasTypeArguments(callTarget)) {
+                signature = getBaseSignature(signature.target);
+            }
+
             if (isJsxOpeningLikeElement(callTarget) && argIndex === 0) {
                 return getEffectiveFirstArgumentForJsxSignature(signature, callTarget);
-            }
-            if (contextFlags && contextFlags & ContextFlags.BaseConstraint && signature.target && !hasTypeArguments(callTarget)) {
-                const baseSignature = getBaseSignature(signature.target);
-                return getTypeAtPosition(baseSignature, argIndex);
             }
             return getTypeAtPosition(signature, argIndex);
         }
@@ -21645,7 +21645,7 @@ namespace ts {
                     return getContextualTypeForJsxAttribute(<JsxAttribute | JsxSpreadAttribute>parent);
                 case SyntaxKind.JsxOpeningElement:
                 case SyntaxKind.JsxSelfClosingElement:
-                    return getContextualJsxElementAttributesType(<JsxOpeningLikeElement>parent);
+                    return getContextualJsxElementAttributesType(<JsxOpeningLikeElement>parent, contextFlags);
             }
             return undefined;
         }
@@ -21655,18 +21655,20 @@ namespace ts {
             return ancestor && ancestor.inferenceContext!;
         }
 
-        function getContextualJsxElementAttributesType(node: JsxOpeningLikeElement) {
-            if (isJsxOpeningElement(node) && node.parent.contextualType) {
+        function getContextualJsxElementAttributesType(node: JsxOpeningLikeElement, contextFlags?: ContextFlags) {
+            if (isJsxOpeningElement(node) && node.parent.contextualType && contextFlags !== ContextFlags.BaseConstraint) {
                 // Contextually applied type is moved from attributes up to the outer jsx attributes so when walking up from the children they get hit
                 // _However_ to hit them from the _attributes_ we must look for them here; otherwise we'll used the declared type
                 // (as below) instead!
                 return node.parent.contextualType;
             }
-            return getContextualTypeForArgumentAtIndex(node, 0);
+            return getContextualTypeForArgumentAtIndex(node, 0, contextFlags);
         }
 
         function getEffectiveFirstArgumentForJsxSignature(signature: Signature, node: JsxOpeningLikeElement) {
-            return getJsxReferenceKind(node) !== JsxReferenceKind.Component ? getJsxPropsTypeFromCallSignature(signature, node) : getJsxPropsTypeFromClassType(signature, node);
+            return getJsxReferenceKind(node) !== JsxReferenceKind.Component
+                ? getJsxPropsTypeFromCallSignature(signature, node)
+                : getJsxPropsTypeFromClassType(signature, node);
         }
 
         function getJsxPropsTypeFromCallSignature(sig: Signature, context: JsxOpeningLikeElement) {
@@ -26437,21 +26439,41 @@ namespace ts {
             return undefinedWideningType;
         }
 
+        function isTopLevelAwait(node: AwaitExpression) {
+            const container = getThisContainer(node, /*includeArrowFunctions*/ true);
+            return isSourceFile(container);
+        }
+
         function checkAwaitExpression(node: AwaitExpression): Type {
             // Grammar checking
             if (produceDiagnostics) {
                 if (!(node.flags & NodeFlags.AwaitContext)) {
-                    // use of 'await' in non-async function
-                    const sourceFile = getSourceFileOfNode(node);
-                    if (!hasParseDiagnostics(sourceFile)) {
-                        const span = getSpanOfTokenAtPosition(sourceFile, node.pos);
-                        const diagnostic = createFileDiagnostic(sourceFile, span.start, span.length, Diagnostics.await_expression_is_only_allowed_within_an_async_function);
-                        const func = getContainingFunction(node);
-                        if (func && func.kind !== SyntaxKind.Constructor && (getFunctionFlags(func) & FunctionFlags.Async) === 0) {
-                            const relatedInfo = createDiagnosticForNode(func, Diagnostics.Did_you_mean_to_mark_this_function_as_async);
-                            addRelatedInfo(diagnostic, relatedInfo);
+                    if (isTopLevelAwait(node)) {
+                        const sourceFile = getSourceFileOfNode(node);
+                        if ((moduleKind !== ModuleKind.ESNext && moduleKind !== ModuleKind.System) ||
+                            languageVersion < ScriptTarget.ES2017 ||
+                            !isEffectiveExternalModule(sourceFile, compilerOptions)) {
+                            if (!hasParseDiagnostics(sourceFile)) {
+                                const span = getSpanOfTokenAtPosition(sourceFile, node.pos);
+                                const diagnostic = createFileDiagnostic(sourceFile, span.start, span.length,
+                                    Diagnostics.await_outside_of_an_async_function_is_only_allowed_at_the_top_level_of_a_module_when_module_is_esnext_or_system_and_target_is_es2017_or_higher);
+                                diagnostics.add(diagnostic);
+                            }
                         }
-                        diagnostics.add(diagnostic);
+                    }
+                    else {
+                        // use of 'await' in non-async function
+                        const sourceFile = getSourceFileOfNode(node);
+                        if (!hasParseDiagnostics(sourceFile)) {
+                            const span = getSpanOfTokenAtPosition(sourceFile, node.pos);
+                            const diagnostic = createFileDiagnostic(sourceFile, span.start, span.length, Diagnostics.await_expression_is_only_allowed_within_an_async_function);
+                            const func = getContainingFunction(node);
+                            if (func && func.kind !== SyntaxKind.Constructor && (getFunctionFlags(func) & FunctionFlags.Async) === 0) {
+                                const relatedInfo = createDiagnosticForNode(func, Diagnostics.Did_you_mean_to_mark_this_function_as_async);
+                                addRelatedInfo(diagnostic, relatedInfo);
+                            }
+                            diagnostics.add(diagnostic);
+                        }
                     }
                 }
 
@@ -36291,8 +36313,8 @@ namespace ts {
             const literalType = isLiteralTypeNode(node.parent) ||
                 isPrefixUnaryExpression(node.parent) && isLiteralTypeNode(node.parent.parent);
             if (!literalType) {
-                if (languageVersion < ScriptTarget.ESNext) {
-                    if (grammarErrorOnNode(node, Diagnostics.BigInt_literals_are_not_available_when_targeting_lower_than_ESNext)) {
+                if (languageVersion < ScriptTarget.ES2020) {
+                    if (grammarErrorOnNode(node, Diagnostics.BigInt_literals_are_not_available_when_targeting_lower_than_ES2020)) {
                         return true;
                     }
                 }
