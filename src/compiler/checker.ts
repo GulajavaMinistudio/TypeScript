@@ -4501,6 +4501,8 @@ namespace ts {
             }
 
             function signatureToSignatureDeclarationHelper(signature: Signature, kind: SyntaxKind, context: NodeBuilderContext): SignatureDeclaration {
+                const suppressAny = context.flags & NodeBuilderFlags.SuppressAnyReturnType;
+                if (suppressAny) context.flags &= ~NodeBuilderFlags.SuppressAnyReturnType; // suppress only toplevel `any`s
                 let typeParameters: TypeParameterDeclaration[] | undefined;
                 let typeArguments: TypeNode[] | undefined;
                 if (context.flags & NodeBuilderFlags.WriteTypeArgumentsOfSignature && signature.target && signature.mapper && signature.target.typeParameters) {
@@ -4530,15 +4532,12 @@ namespace ts {
                 }
                 else {
                     const returnType = getReturnTypeOfSignature(signature);
-                    returnTypeNode = returnType && typeToTypeNodeHelper(returnType, context);
-                }
-                if (context.flags & NodeBuilderFlags.SuppressAnyReturnType) {
-                    if (returnTypeNode && returnTypeNode.kind === SyntaxKind.AnyKeyword) {
-                        returnTypeNode = undefined;
+                    if (returnType && !(suppressAny && isTypeAny(returnType))) {
+                        returnTypeNode = typeToTypeNodeHelper(returnType, context);
                     }
-                }
-                else if (!returnTypeNode) {
-                    returnTypeNode = createKeywordTypeNode(SyntaxKind.AnyKeyword);
+                    else if (!suppressAny) {
+                        returnTypeNode = createKeywordTypeNode(SyntaxKind.AnyKeyword);
+                    }
                 }
                 context.approximateLength += 3; // Usually a signature contributes a few more characters than this, but 3 is the minimum
                 return createSignatureDeclaration(kind, typeParameters, parameters, returnTypeNode, typeArguments);
@@ -6981,7 +6980,7 @@ namespace ts {
                     getTypeWithFacts(type, TypeFacts.NEUndefined) :
                     type;
             }
-            return getUnionType([getTypeWithFacts(type, TypeFacts.NEUndefined), checkDeclarationInitializer(declaration)], UnionReduction.Subtype);
+            return widenTypeInferredFromInitializer(declaration, getUnionType([getTypeWithFacts(type, TypeFacts.NEUndefined), checkDeclarationInitializer(declaration)], UnionReduction.Subtype));
         }
 
         function getTypeForDeclarationFromJSDocComment(declaration: Node) {
@@ -7098,7 +7097,7 @@ namespace ts {
             // Use the type of the initializer expression if one is present and the declaration is
             // not a parameter of a contextually typed function
             if (declaration.initializer && !isParameterOfContextuallyTypedFunction(declaration)) {
-                const type = checkDeclarationInitializer(declaration);
+                const type = widenTypeInferredFromInitializer(declaration, checkDeclarationInitializer(declaration));
                 return addOptionality(type, isOptional);
             }
 
@@ -7330,7 +7329,11 @@ namespace ts {
         // pattern. Otherwise, it is the type any.
         function getTypeFromBindingElement(element: BindingElement, includePatternInType?: boolean, reportErrors?: boolean): Type {
             if (element.initializer) {
-                return addOptionality(checkDeclarationInitializer(element));
+                // The type implied by a binding pattern is independent of context, so we check the initializer with no
+                // contextual type or, if the element itself is a binding pattern, with the type implied by that binding
+                // pattern.
+                const contextualType = isBindingPattern(element.name) ? getTypeFromBindingPattern(element.name, /*includePatternInType*/ true, /*reportErrors*/ false) : unknownType;
+                return addOptionality(widenTypeInferredFromInitializer(element, checkDeclarationInitializer(element, contextualType)));
             }
             if (isBindingPattern(element.name)) {
                 return getTypeFromBindingPattern(element.name, includePatternInType, reportErrors);
@@ -14406,7 +14409,8 @@ namespace ts {
         }
 
         function isEmptyResolvedType(t: ResolvedType) {
-            return t.properties.length === 0 &&
+            return t !== anyFunctionType &&
+                t.properties.length === 0 &&
                 t.callSignatures.length === 0 &&
                 t.constructSignatures.length === 0 &&
                 !t.stringIndexInfo &&
@@ -19041,7 +19045,7 @@ namespace ts {
                     return getTypeOfSymbol(symbol);
                 }
                 if (diagnostic && symbol.valueDeclaration) {
-                    addRelatedInfo(diagnostic, createDiagnosticForNode(symbol.valueDeclaration, Diagnostics._0_is_declared_here, symbolToString(symbol)));
+                    addRelatedInfo(diagnostic, createDiagnosticForNode(symbol.valueDeclaration, Diagnostics._0_needs_an_explicit_type_annotation, symbolToString(symbol)));
                 }
             }
         }
@@ -19773,13 +19777,22 @@ namespace ts {
             }
 
             function narrowTypeByOptionalChainContainment(type: Type, operator: SyntaxKind, value: Expression, assumeTrue: boolean): Type {
-                // We are in a branch of obj?.foo === value or obj?.foo !== value. We remove undefined and null from
-                // the type of obj if (a) the operator is === and the type of value doesn't include undefined or (b) the
-                // operator is !== and the type of value is undefined.
-                const effectiveTrue = operator === SyntaxKind.EqualsEqualsToken || operator === SyntaxKind.EqualsEqualsEqualsToken ? assumeTrue : !assumeTrue;
-                const doubleEquals = operator === SyntaxKind.EqualsEqualsToken || operator === SyntaxKind.ExclamationEqualsToken;
-                const valueNonNullish = !(getTypeFacts(getTypeOfExpression(value)) & (doubleEquals ? TypeFacts.EQUndefinedOrNull : TypeFacts.EQUndefined));
-                return effectiveTrue === valueNonNullish ? getTypeWithFacts(type, TypeFacts.NEUndefinedOrNull) : type;
+                // We are in a branch of obj?.foo === value (or any one of the other equality operators). We narrow obj as follows:
+                // When operator is === and type of value excludes undefined, null and undefined is removed from type of obj in true branch.
+                // When operator is !== and type of value excludes undefined, null and undefined is removed from type of obj in false branch.
+                // When operator is == and type of value excludes null and undefined, null and undefined is removed from type of obj in true branch.
+                // When operator is != and type of value excludes null and undefined, null and undefined is removed from type of obj in false branch.
+                // When operator is === and type of value is undefined, null and undefined is removed from type of obj in false branch.
+                // When operator is !== and type of value is undefined, null and undefined is removed from type of obj in true branch.
+                // When operator is == and type of value is null or undefined, null and undefined is removed from type of obj in false branch.
+                // When operator is != and type of value is null or undefined, null and undefined is removed from type of obj in true branch.
+                const equalsOperator = operator === SyntaxKind.EqualsEqualsToken || operator === SyntaxKind.EqualsEqualsEqualsToken;
+                const nullableFlags = operator === SyntaxKind.EqualsEqualsToken || operator === SyntaxKind.ExclamationEqualsToken ? TypeFlags.Nullable : TypeFlags.Undefined;
+                const valueType = getTypeOfExpression(value);
+                // Note that we include any and unknown in the exclusion test because their domain includes null and undefined.
+                const removeNullable = equalsOperator !== assumeTrue && everyType(valueType, t => !!(t.flags & nullableFlags)) ||
+                    equalsOperator === assumeTrue && everyType(valueType, t => !(t.flags & (TypeFlags.AnyOrUnknown | nullableFlags)));
+                return removeNullable ? getTypeWithFacts(type, TypeFacts.NEUndefinedOrNull) : type;
             }
 
             function narrowTypeByEquality(type: Type, operator: SyntaxKind, value: Expression, assumeTrue: boolean): Type {
@@ -21195,9 +21208,10 @@ namespace ts {
         }
 
         function getContextualTypeForBindingElement(declaration: BindingElement): Type | undefined {
-            const parentDeclaration = declaration.parent.parent;
+            const parent = declaration.parent.parent;
             const name = declaration.propertyName || declaration.name;
-            const parentType = getContextualTypeForVariableLikeDeclaration(parentDeclaration);
+            const parentType = getContextualTypeForVariableLikeDeclaration(parent) ||
+                parent.kind !== SyntaxKind.BindingElement && parent.initializer && checkDeclarationInitializer(parent);
             if (parentType && !isBindingPattern(name) && !isComputedNonLiteralName(name)) {
                 const nameType = getLiteralTypeFromPropertyName(name);
                 if (isTypeUsableAsPropertyName(nameType)) {
@@ -23229,10 +23243,6 @@ namespace ts {
             const assignmentKind = getAssignmentTargetKind(node);
             const apparentType = getApparentType(assignmentKind !== AssignmentKind.None || isMethodAccessForCall(node) ? getWidenedType(leftType) : leftType);
             if (isPrivateIdentifier(right)) {
-                if (isOptionalChain(node)) {
-                    grammarErrorOnNode(right, Diagnostics.An_optional_chain_cannot_contain_private_identifiers);
-                    return anyType;
-                }
                 checkExternalEmitHelpers(node, ExternalEmitHelpers.ClassPrivateFieldGet);
             }
             const isAnyLike = isTypeAny(apparentType) || apparentType === silentNeverType;
@@ -27661,27 +27671,13 @@ namespace ts {
             return node.kind === SyntaxKind.TypeAssertionExpression || node.kind === SyntaxKind.AsExpression;
         }
 
-        function checkDeclarationInitializer(declaration: HasExpressionInitializer) {
+        function checkDeclarationInitializer(declaration: HasExpressionInitializer, contextualType?: Type | undefined) {
             const initializer = getEffectiveInitializer(declaration)!;
-            const type = getQuickTypeOfExpression(initializer) || checkExpressionCached(initializer);
-            const padded = isParameter(declaration) && declaration.name.kind === SyntaxKind.ArrayBindingPattern &&
+            const type = getQuickTypeOfExpression(initializer) ||
+                (contextualType ? checkExpressionWithContextualType(initializer, contextualType, /*inferenceContext*/ undefined, CheckMode.Normal) : checkExpressionCached(initializer));
+            return isParameter(declaration) && declaration.name.kind === SyntaxKind.ArrayBindingPattern &&
                 isTupleType(type) && !type.target.hasRestElement && getTypeReferenceArity(type) < declaration.name.elements.length ?
                 padTupleType(type, declaration.name) : type;
-            const widened = getCombinedNodeFlags(declaration) & NodeFlags.Const ||
-                isDeclarationReadonly(declaration) ||
-                isTypeAssertion(initializer) ||
-                isLiteralOfContextualType(padded, getContextualType(initializer)) ? padded : getWidenedLiteralType(padded);
-            if (isInJSFile(declaration)) {
-                if (widened.flags & TypeFlags.Nullable) {
-                    reportImplicitAny(declaration, anyType);
-                    return anyType;
-                }
-                else if (isEmptyArrayLiteralType(widened)) {
-                    reportImplicitAny(declaration, anyArrayType);
-                    return anyArrayType;
-                }
-            }
-            return widened;
         }
 
         function padTupleType(type: TupleTypeReference, pattern: ArrayBindingPattern) {
@@ -27698,6 +27694,21 @@ namespace ts {
                 }
             }
             return createTupleType(elementTypes, type.target.minLength, /*hasRestElement*/ false, type.target.readonly);
+        }
+
+        function widenTypeInferredFromInitializer(declaration: HasExpressionInitializer, type: Type) {
+            const widened = getCombinedNodeFlags(declaration) & NodeFlags.Const || isDeclarationReadonly(declaration) ? type : getWidenedLiteralType(type);
+            if (isInJSFile(declaration)) {
+                if (widened.flags & TypeFlags.Nullable) {
+                    reportImplicitAny(declaration, anyType);
+                    return anyType;
+                }
+                else if (isEmptyArrayLiteralType(widened)) {
+                    reportImplicitAny(declaration, anyArrayType);
+                    return anyArrayType;
+                }
+            }
+            return widened;
         }
 
         function isLiteralOfContextualType(candidateType: Type, contextualType: Type | undefined): boolean {
@@ -32411,7 +32422,7 @@ namespace ts {
                 }
                 if (isInstancePropertyWithoutInitializer(member)) {
                     const propName = (<PropertyDeclaration>member).name;
-                    if (isIdentifier(propName)) {
+                    if (isIdentifier(propName) || isPrivateIdentifier(propName)) {
                         const type = getTypeOfSymbol(getSymbolOfNode(member));
                         if (!(type.flags & TypeFlags.AnyOrUnknown || getFalsyFlags(type) & TypeFlags.Undefined)) {
                             if (!constructor || !isPropertyInitializedInConstructor(propName, type, constructor)) {
@@ -32430,7 +32441,7 @@ namespace ts {
                 !(<PropertyDeclaration>node).initializer;
         }
 
-        function isPropertyInitializedInConstructor(propName: Identifier, propType: Type, constructor: ConstructorDeclaration) {
+        function isPropertyInitializedInConstructor(propName: Identifier | PrivateIdentifier, propType: Type, constructor: ConstructorDeclaration) {
             const reference = createPropertyAccess(createThis(), propName);
             reference.expression.parent = reference;
             reference.parent = constructor;
@@ -33128,12 +33139,12 @@ namespace ts {
                     importClauseContainsReferencedImport(statement.importClause) &&
                     !isReferencedAliasDeclaration(statement.importClause, /*checkChildren*/ true)
                 ) {
-                    const isError = compilerOptions.importsNotUsedAsValue === ImportsNotUsedAsValue.Error;
+                    const isError = compilerOptions.importsNotUsedAsValues === importsNotUsedAsValues.Error;
                     errorOrSuggestion(
                         isError,
                         statement,
                         isError
-                            ? Diagnostics.This_import_is_never_used_as_a_value_and_must_use_import_type_because_the_importsNotUsedAsValue_is_set_to_error
+                            ? Diagnostics.This_import_is_never_used_as_a_value_and_must_use_import_type_because_the_importsNotUsedAsValues_is_set_to_error
                             : Diagnostics.This_import_may_be_converted_to_a_type_only_import);
                 }
             }
@@ -35966,29 +35977,31 @@ namespace ts {
                         throw Debug.assertNever(prop, "Unexpected syntax kind:" + (<Node>prop).kind);
                 }
 
-                const effectiveName = getPropertyNameForPropertyNameNode(name);
-                if (effectiveName === undefined) {
-                    continue;
-                }
-
-                const existingKind = seen.get(effectiveName);
-                if (!existingKind) {
-                    seen.set(effectiveName, currentKind);
-                }
-                else {
-                    if ((currentKind & DeclarationMeaning.PropertyAssignmentOrMethod) && (existingKind & DeclarationMeaning.PropertyAssignmentOrMethod)) {
-                        grammarErrorOnNode(name, Diagnostics.Duplicate_identifier_0, getTextOfNode(name));
+                if (!inDestructuring) {
+                    const effectiveName = getPropertyNameForPropertyNameNode(name);
+                    if (effectiveName === undefined) {
+                        continue;
                     }
-                    else if ((currentKind & DeclarationMeaning.GetOrSetAccessor) && (existingKind & DeclarationMeaning.GetOrSetAccessor)) {
-                        if (existingKind !== DeclarationMeaning.GetOrSetAccessor && currentKind !== existingKind) {
-                            seen.set(effectiveName, currentKind | existingKind);
-                        }
-                        else {
-                            return grammarErrorOnNode(name, Diagnostics.An_object_literal_cannot_have_multiple_get_Slashset_accessors_with_the_same_name);
-                        }
+
+                    const existingKind = seen.get(effectiveName);
+                    if (!existingKind) {
+                        seen.set(effectiveName, currentKind);
                     }
                     else {
-                        return grammarErrorOnNode(name, Diagnostics.An_object_literal_cannot_have_property_and_accessor_with_the_same_name);
+                        if ((currentKind & DeclarationMeaning.PropertyAssignmentOrMethod) && (existingKind & DeclarationMeaning.PropertyAssignmentOrMethod)) {
+                            grammarErrorOnNode(name, Diagnostics.Duplicate_identifier_0, getTextOfNode(name));
+                        }
+                        else if ((currentKind & DeclarationMeaning.GetOrSetAccessor) && (existingKind & DeclarationMeaning.GetOrSetAccessor)) {
+                            if (existingKind !== DeclarationMeaning.GetOrSetAccessor && currentKind !== existingKind) {
+                                seen.set(effectiveName, currentKind | existingKind);
+                            }
+                            else {
+                                return grammarErrorOnNode(name, Diagnostics.An_object_literal_cannot_have_multiple_get_Slashset_accessors_with_the_same_name);
+                            }
+                        }
+                        else {
+                            return grammarErrorOnNode(name, Diagnostics.An_object_literal_cannot_have_property_and_accessor_with_the_same_name);
+                        }
                     }
                 }
             }
