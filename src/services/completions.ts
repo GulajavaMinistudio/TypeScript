@@ -1143,7 +1143,7 @@ namespace ts.Completions {
                 }
             }
 
-            if (isMetaProperty(node) && (node.keywordToken === SyntaxKind.NewKeyword || node.keywordToken === SyntaxKind.ImportKeyword)) {
+            if (isMetaProperty(node) && (node.keywordToken === SyntaxKind.NewKeyword || node.keywordToken === SyntaxKind.ImportKeyword) && contextToken === node.getChildAt(1)) {
                 const completion = (node.keywordToken === SyntaxKind.NewKeyword) ? "target" : "meta";
                 symbols.push(typeChecker.createSymbol(SymbolFlags.Property, escapeLeadingUnderscores(completion)));
                 return;
@@ -2608,6 +2608,9 @@ namespace ts.Completions {
         if (!contextToken) return undefined;
 
         switch (contextToken.kind) {
+            case SyntaxKind.EqualsToken: // class c { public prop = | /* global completions */ }
+                return undefined;
+
             case SyntaxKind.SemicolonToken: // class c {getValue(): number; | }
             case SyntaxKind.CloseBraceToken: // class c { method() { } | }
                 // class c { method() { } b| }
