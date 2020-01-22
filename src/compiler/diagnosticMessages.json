@@ -1055,10 +1055,6 @@
         "category": "Error",
         "code": 1359
     },
-    "Did you mean to parenthesize this function type?": {
-        "category": "Error",
-        "code": 1360
-    },
     "Type-only {0} must reference a type, but '{1}' is a value.": {
         "category": "Error",
         "code": 1361
@@ -1767,6 +1763,14 @@
     "An AMD module cannot have multiple name assignments.": {
         "category": "Error",
         "code": 2458
+    },
+    "Module '{0}' declares '{1}' locally, but it is not exported.": {
+        "category": "Error",
+        "code": 2459
+    },
+    "Module '{0}' declares '{1}' locally, but it is exported as '{2}'.": {
+        "category": "Error",
+        "code": 2460
     },
     "Type '{0}' is not an array type.": {
         "category": "Error",
