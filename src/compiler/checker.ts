@@ -1792,6 +1792,7 @@ namespace ts {
                         !checkAndReportErrorForMissingPrefix(errorLocation, name, nameArg!) && // TODO: GH#18217
                         !checkAndReportErrorForExtendingInterface(errorLocation) &&
                         !checkAndReportErrorForUsingTypeAsNamespace(errorLocation, name, meaning) &&
+                        !checkAndReportErrorForExportingPrimitiveType(errorLocation, name) &&
                         !checkAndReportErrorForUsingTypeAsValue(errorLocation, name, meaning) &&
                         !checkAndReportErrorForUsingNamespaceModuleAsValue(errorLocation, name, meaning) &&
                         !checkAndReportErrorForUsingValueAsType(errorLocation, name, meaning)) {
@@ -1878,12 +1879,7 @@ namespace ts {
         }
 
         function checkSymbolUsageInExpressionContext(symbol: Symbol, name: __String, useSite: Node) {
-            if (
-                !(useSite.flags & NodeFlags.Ambient) &&
-                !isPartOfTypeQuery(useSite) &&
-                !isPartOfPossiblyValidTypeOrAbstractComputedPropertyName(useSite) &&
-                isExpressionNode(useSite)
-            ) {
+            if (!isValidTypeOnlyAliasUseSite(useSite)) {
                 const typeOnlyDeclaration = getTypeOnlyAliasDeclaration(symbol);
                 if (typeOnlyDeclaration) {
                     const message = typeOnlyDeclaration.kind === SyntaxKind.ExportSpecifier
@@ -2053,9 +2049,21 @@ namespace ts {
             return false;
         }
 
+        function isPrimitiveTypeName(name: __String) {
+            return name === "any" || name === "string" || name === "number" || name === "boolean" || name === "never" || name === "unknown";
+        }
+
+        function checkAndReportErrorForExportingPrimitiveType(errorLocation: Node, name: __String): boolean {
+            if (isPrimitiveTypeName(name) && errorLocation.parent.kind === SyntaxKind.ExportSpecifier) {
+                error(errorLocation, Diagnostics.Cannot_export_0_Only_local_declarations_can_be_exported_from_a_module, name as string);
+                return true;
+            }
+            return false;
+        }
+
         function checkAndReportErrorForUsingTypeAsValue(errorLocation: Node, name: __String, meaning: SymbolFlags): boolean {
             if (meaning & (SymbolFlags.Value & ~SymbolFlags.NamespaceModule)) {
-                if (name === "any" || name === "string" || name === "number" || name === "boolean" || name === "never") {
+                if (isPrimitiveTypeName(name)) {
                     error(errorLocation, Diagnostics._0_only_refers_to_a_type_but_is_being_used_as_a_value_here, unescapeLeadingUnderscores(name));
                     return true;
                 }
@@ -2763,7 +2771,7 @@ namespace ts {
          */
         function getExpandoSymbol(symbol: Symbol): Symbol | undefined {
             const decl = symbol.valueDeclaration;
-            if (!decl || !isInJSFile(decl) || symbol.flags & SymbolFlags.TypeAlias) {
+            if (!decl || !isInJSFile(decl) || symbol.flags & SymbolFlags.TypeAlias || getExpandoInitializer(decl, /*isPrototypeAssignment*/ false)) {
                 return undefined;
             }
             const init = isVariableDeclaration(decl) ? getDeclaredExpandoInitializer(decl) : getAssignedExpandoInitializer(decl);
@@ -3943,7 +3951,7 @@ namespace ts {
                 }
                 if (type.flags & TypeFlags.StringLiteral) {
                     context.approximateLength += ((<StringLiteralType>type).value.length + 2);
-                    return createLiteralTypeNode(setEmitFlags(createLiteral((<StringLiteralType>type).value), EmitFlags.NoAsciiEscaping));
+                    return createLiteralTypeNode(setEmitFlags(createLiteral((<StringLiteralType>type).value, !!(context.flags & NodeBuilderFlags.UseSingleQuotesForStringLiteralType)), EmitFlags.NoAsciiEscaping));
                 }
                 if (type.flags & TypeFlags.NumberLiteral) {
                     const value = (<NumberLiteralType>type).value;
@@ -33300,6 +33308,7 @@ namespace ts {
                 const id = node.expression as Identifier;
                 const sym = resolveEntityName(id, SymbolFlags.All, /*ignoreErrors*/ true, /*dontResolveAlias*/ true, node);
                 if (sym) {
+
                     markAliasReferenced(sym, id);
                     // If not a value, we're interpreting the identifier as a type export, along the lines of (`export { Id as default }`)
                     const target = sym.flags & SymbolFlags.Alias ? resolveAlias(sym) : sym;

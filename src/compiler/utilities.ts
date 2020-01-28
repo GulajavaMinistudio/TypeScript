@@ -1792,6 +1792,11 @@ namespace ts {
         return containerKind === SyntaxKind.InterfaceDeclaration || containerKind === SyntaxKind.TypeLiteral;
     }
 
+    export function isFirstIdentifierOfImplementsClause(node: Node) {
+        return node.parent?.parent?.parent?.kind === SyntaxKind.HeritageClause
+            && (node.parent.parent.parent as HeritageClause).token === SyntaxKind.ImplementsKeyword;
+    }
+
     export function isExternalModuleImportEqualsDeclaration(node: Node): node is ImportEqualsDeclaration & { moduleReference: ExternalModuleReference } {
         return node.kind === SyntaxKind.ImportEqualsDeclaration && (<ImportEqualsDeclaration>node).moduleReference.kind === SyntaxKind.ExternalModuleReference;
     }
@@ -6133,5 +6138,13 @@ namespace ts {
 
     export function pseudoBigIntToString({negative, base10Value}: PseudoBigInt): string {
         return (negative && base10Value !== "0" ? "-" : "") + base10Value;
+    }
+
+    export function isValidTypeOnlyAliasUseSite(useSite: Node): boolean {
+        return !!(useSite.flags & NodeFlags.Ambient)
+            || isPartOfTypeQuery(useSite)
+            || isFirstIdentifierOfImplementsClause(useSite)
+            || isPartOfPossiblyValidTypeOrAbstractComputedPropertyName(useSite)
+            || !isExpressionNode(useSite);
     }
 }
