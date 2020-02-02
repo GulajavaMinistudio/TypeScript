@@ -32,6 +32,7 @@ namespace ts.codefix {
             // Keys are import clause node IDs.
             const addToExisting = createMap<{ readonly importClause: ImportClause, defaultImport: string | undefined; readonly namedImports: string[], canUseTypeOnlyImport: boolean }>();
             const newImports = createMap<Mutable<ImportsCollection>>();
+            let lastModuleSpecifier: string | undefined;
 
             eachDiagnostic(context, errorCodes, diag => {
                 const info = getFixesInfo(context, diag.code, diag.start);
@@ -67,6 +68,7 @@ namespace ts.codefix {
                         let entry = newImports.get(moduleSpecifier);
                         if (!entry) {
                             newImports.set(moduleSpecifier, entry = { defaultImport: undefined, namedImports: [], namespaceLikeImport: undefined });
+                            lastModuleSpecifier = moduleSpecifier;
                         }
                         switch (importKind) {
                             case ImportKind.Default:
@@ -101,7 +103,7 @@ namespace ts.codefix {
                     doAddExistingFix(changes, sourceFile, importClause, defaultImport, namedImports, canUseTypeOnlyImport);
                 });
                 newImports.forEach((imports, moduleSpecifier) => {
-                    addNewImports(changes, sourceFile, moduleSpecifier, quotePreference, imports);
+                    addNewImports(changes, sourceFile, moduleSpecifier, quotePreference, imports, /*blankLineBetween*/ lastModuleSpecifier === moduleSpecifier);
                 });
             }));
         },
@@ -461,28 +463,32 @@ namespace ts.codefix {
         const defaultExport = checker.tryGetMemberInModuleExports(InternalSymbolName.Default, moduleSymbol);
         if (defaultExport) return { symbol: defaultExport, kind: ImportKind.Default };
         const exportEquals = checker.resolveExternalModuleSymbol(moduleSymbol);
-        return exportEquals === moduleSymbol ? undefined : { symbol: exportEquals, kind: getExportEqualsImportKind(importingFile, compilerOptions, checker) };
+        return exportEquals === moduleSymbol ? undefined : { symbol: exportEquals, kind: getExportEqualsImportKind(importingFile, compilerOptions) };
     }
 
-    function getExportEqualsImportKind(importingFile: SourceFile, compilerOptions: CompilerOptions, checker: TypeChecker): ImportKind {
+    function getExportEqualsImportKind(importingFile: SourceFile, compilerOptions: CompilerOptions): ImportKind {
+        const allowSyntheticDefaults = getAllowSyntheticDefaultImports(compilerOptions);
+        // 1. 'import =' will not work in es2015+, so the decision is between a default
+        //    and a namespace import, based on allowSyntheticDefaultImports/esModuleInterop.
         if (getEmitModuleKind(compilerOptions) >= ModuleKind.ES2015) {
-            return getAllowSyntheticDefaultImports(compilerOptions) ? ImportKind.Default : ImportKind.Namespace;
+            return allowSyntheticDefaults ? ImportKind.Default : ImportKind.Namespace;
         }
+        // 2. 'import =' will not work in JavaScript, so the decision is between a default
+        //    and const/require.
         if (isInJSFile(importingFile)) {
             return isExternalModule(importingFile) ? ImportKind.Default : ImportKind.ConstEquals;
         }
+        // 3. At this point the most correct choice is probably 'import =', but people
+        //    really hate that, so look to see if the importing file has any precedent
+        //    on how to handle it.
         for (const statement of importingFile.statements) {
             if (isImportEqualsDeclaration(statement)) {
                 return ImportKind.Equals;
             }
-            if (isImportDeclaration(statement) && statement.importClause && statement.importClause.name) {
-                const moduleSymbol = checker.getImmediateAliasedSymbol(statement.importClause.symbol);
-                if (moduleSymbol && moduleSymbol.name !== InternalSymbolName.Default) {
-                    return ImportKind.Default;
-                }
-            }
         }
-        return ImportKind.Equals;
+        // 4. We have no precedent to go on, so just use a default import if
+        //    allowSyntheticDefaultImports/esModuleInterop is enabled.
+        return allowSyntheticDefaults ? ImportKind.Default : ImportKind.Equals;
     }
 
     function getDefaultExportInfoWorker(defaultExport: Symbol, moduleSymbol: Symbol, checker: TypeChecker, compilerOptions: CompilerOptions): { readonly symbolForMeaning: Symbol, readonly name: string } | undefined {
@@ -543,7 +549,7 @@ namespace ts.codefix {
                 const { importKind, moduleSpecifier } = fix;
                 addNewImports(changes, sourceFile, moduleSpecifier, quotePreference, importKind === ImportKind.Default ? { defaultImport: symbolName, namedImports: emptyArray, namespaceLikeImport: undefined }
                     : importKind === ImportKind.Named ? { defaultImport: undefined, namedImports: [symbolName], namespaceLikeImport: undefined }
-                    : { defaultImport: undefined, namedImports: emptyArray, namespaceLikeImport: { importKind, name: symbolName } });
+                    : { defaultImport: undefined, namedImports: emptyArray, namespaceLikeImport: { importKind, name: symbolName } }, /*blankLineBetween*/ true);
                 return [importKind === ImportKind.Default ? Diagnostics.Import_default_0_from_module_1 : Diagnostics.Import_0_from_module_1, symbolName, moduleSpecifier];
             }
             default:
@@ -604,13 +610,13 @@ namespace ts.codefix {
             readonly name: string;
         } | undefined;
     }
-    function addNewImports(changes: textChanges.ChangeTracker, sourceFile: SourceFile, moduleSpecifier: string, quotePreference: QuotePreference, { defaultImport, namedImports, namespaceLikeImport }: ImportsCollection): void {
+    function addNewImports(changes: textChanges.ChangeTracker, sourceFile: SourceFile, moduleSpecifier: string, quotePreference: QuotePreference, { defaultImport, namedImports, namespaceLikeImport }: ImportsCollection, blankLineBetween: boolean): void {
         const quotedModuleSpecifier = makeStringLiteral(moduleSpecifier, quotePreference);
         if (defaultImport !== undefined || namedImports.length) {
             insertImport(changes, sourceFile,
                 makeImport(
                     defaultImport === undefined ? undefined : createIdentifier(defaultImport),
-                    namedImports.map(n => createImportSpecifier(/*propertyName*/ undefined, createIdentifier(n))), moduleSpecifier, quotePreference));
+                    namedImports.map(n => createImportSpecifier(/*propertyName*/ undefined, createIdentifier(n))), moduleSpecifier, quotePreference), /*blankLineBetween*/ blankLineBetween);
         }
         if (namespaceLikeImport) {
             insertImport(
@@ -618,7 +624,7 @@ namespace ts.codefix {
                 sourceFile,
                 namespaceLikeImport.importKind === ImportKind.Equals ? createImportEqualsDeclaration(/*decorators*/ undefined, /*modifiers*/ undefined, createIdentifier(namespaceLikeImport.name), createExternalModuleReference(quotedModuleSpecifier)) :
                 namespaceLikeImport.importKind === ImportKind.ConstEquals ? createConstEqualsRequireDeclaration(namespaceLikeImport.name, quotedModuleSpecifier) :
-                createImportDeclaration(/*decorators*/ undefined, /*modifiers*/ undefined, createImportClause(/*name*/ undefined, createNamespaceImport(createIdentifier(namespaceLikeImport.name))), quotedModuleSpecifier));
+                createImportDeclaration(/*decorators*/ undefined, /*modifiers*/ undefined, createImportClause(/*name*/ undefined, createNamespaceImport(createIdentifier(namespaceLikeImport.name))), quotedModuleSpecifier), /*blankLineBetween*/ blankLineBetween);
         }
     }
 
