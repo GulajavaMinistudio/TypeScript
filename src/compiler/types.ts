@@ -4808,8 +4808,8 @@ namespace ts {
     // Thus, if Foo has a 'string' constraint on its type parameter, T will satisfy it. Substitution
     // types disappear upon instantiation (just like type parameters).
     export interface SubstitutionType extends InstantiableType {
-        typeVariable: TypeVariable;  // Target type variable
-        substitute: Type;            // Type to substitute for type parameter
+        baseType: Type;     // Target type
+        substitute: Type;   // Type to substitute for type parameter
     }
 
     /* @internal */
@@ -4889,7 +4889,20 @@ namespace ts {
     }
 
     /* @internal */
-    export type TypeMapper = (t: TypeParameter) => Type;
+    export const enum TypeMapKind {
+        Simple,
+        Array,
+        Function,
+        Composite,
+        Merged,
+    }
+
+    /* @internal */
+    export type TypeMapper =
+        | { kind: TypeMapKind.Simple, source: Type, target: Type }
+        | { kind: TypeMapKind.Array, sources: readonly Type[], targets: readonly Type[] | undefined }
+        | { kind: TypeMapKind.Function, func: (t: Type) => Type }
+        | { kind: TypeMapKind.Composite | TypeMapKind.Merged, mapper1: TypeMapper, mapper2: TypeMapper };
 
     export const enum InferencePriority {
         NakedTypeVariable            = 1 << 0,  // Naked type variable in union or intersection type
@@ -5635,7 +5648,7 @@ namespace ts {
     export interface ResolvedModuleWithFailedLookupLocations {
         readonly resolvedModule: ResolvedModuleFull | undefined;
         /* @internal */
-        readonly failedLookupLocations: readonly string[];
+        readonly failedLookupLocations: string[];
     }
 
     export interface ResolvedTypeReferenceDirective {
@@ -5650,7 +5663,7 @@ namespace ts {
 
     export interface ResolvedTypeReferenceDirectiveWithFailedLookupLocations {
         readonly resolvedTypeReferenceDirective: ResolvedTypeReferenceDirective | undefined;
-        readonly failedLookupLocations: readonly string[];
+        readonly failedLookupLocations: string[];
     }
 
     /* @internal */
@@ -5687,7 +5700,6 @@ namespace ts {
         /* @internal */ hasChangedAutomaticTypeDirectiveNames?: boolean;
         createHash?(data: string): string;
         getParsedCommandLine?(fileName: string): ParsedCommandLine | undefined;
-        /* @internal */ setResolvedProjectReferenceCallbacks?(callbacks: ResolvedProjectReferenceCallbacks): void;
         /* @internal */ useSourceOfProjectReferenceRedirect?(): boolean;
 
         // TODO: later handle this in better way in builder host instead once the api for tsbuild finalizes and doesn't use compilerHost as base
