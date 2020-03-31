@@ -20265,12 +20265,6 @@ namespace ts {
                         if (right.kind === SyntaxKind.TypeOfExpression && isStringLiteralLike(left)) {
                             return narrowTypeByTypeof(type, <TypeOfExpression>right, operator, left, assumeTrue);
                         }
-                        if (isConstructorAccessExpression(left)) {
-                            return narrowTypeByConstructor(type, left, operator, right, assumeTrue);
-                        }
-                        if (isConstructorAccessExpression(right)) {
-                            return narrowTypeByConstructor(type, right, operator, left, assumeTrue);
-                        }
                         if (isMatchingReference(reference, left)) {
                             return narrowTypeByEquality(type, operator, right, assumeTrue);
                         }
@@ -20290,6 +20284,12 @@ namespace ts {
                         }
                         if (isMatchingReferenceDiscriminant(right, declaredType)) {
                             return narrowTypeByDiscriminant(type, <AccessExpression>right, t => narrowTypeByEquality(t, operator, left, assumeTrue));
+                        }
+                        if (isMatchingConstructorReference(left)) {
+                            return narrowTypeByConstructor(type, operator, right, assumeTrue);
+                        }
+                        if (isMatchingConstructorReference(right)) {
+                            return narrowTypeByConstructor(type, operator, left, assumeTrue);
                         }
                         break;
                     case SyntaxKind.InstanceOfKeyword:
@@ -20366,7 +20366,7 @@ namespace ts {
                 }
                 if (isUnitType(valueType)) {
                     const regularType = getRegularTypeOfLiteralType(valueType);
-                    return filterType(type, t => getRegularTypeOfLiteralType(t) !== regularType);
+                    return filterType(type, t => isUnitType(t) ? !areTypesComparable(t, valueType) : getRegularTypeOfLiteralType(t) !== regularType);
                 }
                 return type;
             }
@@ -20564,15 +20564,16 @@ namespace ts {
                 return getTypeWithFacts(mapType(type, narrowTypeForTypeofSwitch(impliedType)), switchFacts);
             }
 
-            function narrowTypeByConstructor(type: Type, constructorAccessExpr: AccessExpression, operator: SyntaxKind, identifier: Expression, assumeTrue: boolean): Type {
+            function isMatchingConstructorReference(expr: Expression) {
+                return (isPropertyAccessExpression(expr) && idText(expr.name) === "constructor" ||
+                    isElementAccessExpression(expr) && isStringLiteralLike(expr.argumentExpression) && expr.argumentExpression.text === "constructor") &&
+                    isMatchingReference(reference, expr.expression);
+            }
+
+            function narrowTypeByConstructor(type: Type, operator: SyntaxKind, identifier: Expression, assumeTrue: boolean): Type {
                 // Do not narrow when checking inequality.
                 if (assumeTrue ? (operator !== SyntaxKind.EqualsEqualsToken && operator !== SyntaxKind.EqualsEqualsEqualsToken) : (operator !== SyntaxKind.ExclamationEqualsToken && operator !== SyntaxKind.ExclamationEqualsEqualsToken)) {
                     return type;
-                }
-
-                // In the case of `x.y`, a `x.constructor === T` type guard resets the narrowed type of `y` to its declared type.
-                if (!isMatchingReference(reference, constructorAccessExpr.expression)) {
-                    return declaredType;
                 }
 
                 // Get the type of the constructor identifier expression, if it is not a function then do not narrow.
@@ -21810,7 +21811,7 @@ namespace ts {
                 const contextualReturnType = getContextualReturnType(func);
                 if (contextualReturnType) {
                     if (functionFlags & FunctionFlags.Async) { // Async function
-                        const contextualAwaitedType = getAwaitedTypeOfPromise(contextualReturnType);
+                        const contextualAwaitedType = mapType(contextualReturnType, getAwaitedTypeOfPromise);
                         return contextualAwaitedType && getUnionType([contextualAwaitedType, createPromiseLikeType(contextualAwaitedType)]);
                     }
                     return contextualReturnType; // Regular function
@@ -23356,18 +23357,18 @@ namespace ts {
             return anyType;
         }
 
-        function checkJsxReturnAssignableToAppropriateBound(refKind: JsxReferenceKind, elemInstanceType: Type, openingLikeElement: Node) {
+        function checkJsxReturnAssignableToAppropriateBound(refKind: JsxReferenceKind, elemInstanceType: Type, openingLikeElement: JsxOpeningLikeElement) {
             if (refKind === JsxReferenceKind.Function) {
                 const sfcReturnConstraint = getJsxStatelessElementTypeAt(openingLikeElement);
                 if (sfcReturnConstraint) {
-                    checkTypeRelatedTo(elemInstanceType, sfcReturnConstraint, assignableRelation, openingLikeElement, Diagnostics.JSX_element_type_0_is_not_a_constructor_function_for_JSX_elements);
+                    checkTypeRelatedTo(elemInstanceType, sfcReturnConstraint, assignableRelation, openingLikeElement.tagName, Diagnostics.Its_return_type_0_is_not_a_valid_JSX_element, generateInitialErrorChain);
                 }
             }
             else if (refKind === JsxReferenceKind.Component) {
                 const classConstraint = getJsxElementClassTypeAt(openingLikeElement);
                 if (classConstraint) {
-                    // Issue an error if this return type isn't assignable to JSX.ElementClass or JSX.Element, failing that
-                    checkTypeRelatedTo(elemInstanceType, classConstraint, assignableRelation, openingLikeElement, Diagnostics.JSX_element_type_0_is_not_a_constructor_function_for_JSX_elements);
+                    // Issue an error if this return type isn't assignable to JSX.ElementClass, failing that
+                    checkTypeRelatedTo(elemInstanceType, classConstraint, assignableRelation, openingLikeElement.tagName, Diagnostics.Its_instance_type_0_is_not_a_valid_JSX_element, generateInitialErrorChain);
                 }
             }
             else { // Mixed
@@ -23377,7 +23378,12 @@ namespace ts {
                     return;
                 }
                 const combined = getUnionType([sfcReturnConstraint, classConstraint]);
-                checkTypeRelatedTo(elemInstanceType, combined, assignableRelation, openingLikeElement, Diagnostics.JSX_element_type_0_is_not_a_constructor_function_for_JSX_elements);
+                checkTypeRelatedTo(elemInstanceType, combined, assignableRelation, openingLikeElement.tagName, Diagnostics.Its_element_type_0_is_not_a_valid_JSX_element, generateInitialErrorChain);
+            }
+
+            function generateInitialErrorChain(): DiagnosticMessageChain {
+                const componentName = getTextOfNode(openingLikeElement.tagName);
+                return chainDiagnosticMessages(/* details */ undefined, Diagnostics._0_cannot_be_used_as_a_JSX_component, componentName);
             }
         }
 
@@ -23468,8 +23474,9 @@ namespace ts {
             }
 
             if (isNodeOpeningLikeElement) {
-                const sig = getResolvedSignature(node as JsxOpeningLikeElement);
-                checkJsxReturnAssignableToAppropriateBound(getJsxReferenceKind(node as JsxOpeningLikeElement), getReturnTypeOfSignature(sig), node);
+                const jsxOpeningLikeNode = node as JsxOpeningLikeElement;
+                const sig = getResolvedSignature(jsxOpeningLikeNode);
+                checkJsxReturnAssignableToAppropriateBound(getJsxReferenceKind(jsxOpeningLikeNode), getReturnTypeOfSignature(sig), jsxOpeningLikeNode);
             }
         }
 
@@ -26633,7 +26640,7 @@ namespace ts {
 
         function getNonArrayRestType(signature: Signature) {
             const restType = getEffectiveRestType(signature);
-            return restType && !isArrayType(restType) && !isTypeAny(restType) ? restType : undefined;
+            return restType && !isArrayType(restType) && !isTypeAny(restType) && (getReducedType(restType).flags & TypeFlags.Never) === 0 ? restType : undefined;
         }
 
         function getTypeOfFirstParameterOfSignature(signature: Signature) {
@@ -29023,7 +29030,7 @@ namespace ts {
 
             // Only check rest parameter type if it's not a binding pattern. Since binding patterns are
             // not allowed in a rest parameter, we already have an error from checkGrammarParameterList.
-            if (node.dotDotDotToken && !isBindingPattern(node.name) && !isTypeAssignableTo(getTypeOfSymbol(node.symbol), anyReadonlyArrayType)) {
+            if (node.dotDotDotToken && !isBindingPattern(node.name) && !isTypeAssignableTo(getReducedType(getTypeOfSymbol(node.symbol)), anyReadonlyArrayType)) {
                 error(node, Diagnostics.A_rest_parameter_must_be_of_an_array_type);
             }
         }
@@ -31013,6 +31020,18 @@ namespace ts {
             return tryCast(getRootDeclaration(node), isParameter);
         }
 
+        function isValidUnusedLocalDeclaration(declaration: Declaration): boolean {
+            if (isBindingElement(declaration) && isIdentifierThatStartsWithUnderscore(declaration.name)) {
+                return !!findAncestor(declaration.parent, ancestor =>
+                    isArrayBindingPattern(ancestor) || isVariableDeclaration(ancestor) || isVariableDeclarationList(ancestor) ? false :
+                        isForOfStatement(ancestor) ? true : "quit"
+                );
+            }
+
+            return isAmbientModule(declaration) ||
+                (isVariableDeclaration(declaration) && isForInOrOfStatement(declaration.parent.parent) || isImportedDeclaration(declaration)) && isIdentifierThatStartsWithUnderscore(declaration.name!);
+        }
+
         function checkUnusedLocalsAndParameters(nodeWithLocals: Node, addDiagnostic: AddUnusedDiagnostic): void {
             // Ideally we could use the ImportClause directly as a key, but must wait until we have full ES6 maps. So must store key along with value.
             const unusedImports = createMap<[ImportClause, ImportedDeclaration[]]>();
@@ -31026,8 +31045,7 @@ namespace ts {
                 }
 
                 for (const declaration of local.declarations) {
-                    if (isAmbientModule(declaration) ||
-                        (isVariableDeclaration(declaration) && isForInOrOfStatement(declaration.parent.parent) || isImportedDeclaration(declaration)) && isIdentifierThatStartsWithUnderscore(declaration.name!)) {
+                    if (isValidUnusedLocalDeclaration(declaration)) {
                         continue;
                     }
 
@@ -31603,8 +31621,31 @@ namespace ts {
             const functionIsUsedInBody = forEachChild(body, function check(childNode): boolean | undefined {
                 if (isIdentifier(childNode)) {
                     const childSymbol = getSymbolAtLocation(childNode);
-                    if (childSymbol && childSymbol.id === testedFunctionSymbol.id) {
-                        return true;
+                    if (childSymbol && childSymbol === testedFunctionSymbol) {
+                        // If the test was a simple identifier, the above check is sufficient
+                        if (isIdentifier(condExpr)) {
+                            return true;
+                        }
+                        // Otherwise we need to ensure the symbol is called on the same target
+                        let testedExpression = testedNode.parent;
+                        let childExpression = childNode.parent;
+                        while (testedExpression && childExpression) {
+
+                            if (isIdentifier(testedExpression) && isIdentifier(childExpression)) {
+                                return getSymbolAtLocation(testedExpression) === getSymbolAtLocation(childExpression);
+                            }
+
+                            if (isPropertyAccessExpression(testedExpression) && isPropertyAccessExpression(childExpression)) {
+                                if (getSymbolAtLocation(testedExpression.name) !== getSymbolAtLocation(childExpression.name)) {
+                                    return false;
+                                }
+                                childExpression = childExpression.expression;
+                                testedExpression = testedExpression.expression;
+                            }
+                            else {
+                                return false;
+                            }
+                        }
                     }
                 }
 

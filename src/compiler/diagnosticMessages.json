@@ -2947,6 +2947,22 @@
         "category": "Error",
         "code": 2785
     },
+    "'{0}' cannot be used as a JSX component.": {
+        "category": "Error",
+        "code": 2786
+    },
+    "Its return type '{0}' is not a valid JSX element.": {
+        "category": "Error",
+        "code": 2787
+    },
+    "Its instance type '{0}' is not a valid JSX element.": {
+        "category": "Error",
+        "code": 2788
+    },
+    "Its element type '{0}' is not a valid JSX element.": {
+        "category": "Error",
+        "code": 2789
+    },
 
     "Import declaration '{0}' is using private name '{1}'.": {
         "category": "Error",
@@ -5597,7 +5613,10 @@
         "category": "Message",
         "code": 95109
     },
-
+    "Visit https://aka.ms/tsconfig.json to read more about this file": {
+        "category": "Message",
+        "code": 95110
+    },
     "No value exists in scope for the shorthand property '{0}'. Either declare one or provide an initializer.": {
         "category": "Error",
         "code": 18004
