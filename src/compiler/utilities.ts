@@ -1092,6 +1092,26 @@ namespace ts {
             && (<ExpressionStatement>node).expression.kind === SyntaxKind.StringLiteral;
     }
 
+    export function isCustomPrologue(node: Statement) {
+        return !!(getEmitFlags(node) & EmitFlags.CustomPrologue);
+    }
+
+    export function isHoistedFunction(node: Statement) {
+        return isCustomPrologue(node)
+            && isFunctionDeclaration(node);
+    }
+
+    function isHoistedVariable(node: VariableDeclaration) {
+        return isIdentifier(node.name)
+            && !node.initializer;
+    }
+
+    export function isHoistedVariableStatement(node: Statement) {
+        return isCustomPrologue(node)
+            && isVariableStatement(node)
+            && every(node.declarationList.declarations, isHoistedVariable);
+    }
+
     export function getLeadingCommentRangesOfNode(node: Node, sourceFileOfNode: SourceFile) {
         return node.kind !== SyntaxKind.JsxText ? getLeadingCommentRanges(sourceFileOfNode.text, node.pos) : undefined;
     }
@@ -2292,6 +2312,17 @@ namespace ts {
             expr.parent && expr.parent.kind === SyntaxKind.ExpressionStatement &&
             (!isElementAccessExpression(expr) || isLiteralLikeElementAccess(expr)) &&
             !!getJSDocTypeTag(expr.parent);
+    }
+
+    export function setValueDeclaration(symbol: Symbol, node: Declaration): void {
+        const { valueDeclaration } = symbol;
+        if (!valueDeclaration ||
+            !(node.flags & NodeFlags.Ambient && !(valueDeclaration.flags & NodeFlags.Ambient)) &&
+            (isAssignmentDeclaration(valueDeclaration) && !isAssignmentDeclaration(node)) ||
+            (valueDeclaration.kind !== node.kind && isEffectiveModuleDeclaration(valueDeclaration))) {
+            // other kinds of value declarations take precedence over modules and assignment declarations
+            symbol.valueDeclaration = node;
+        }
     }
 
     export function isFunctionSymbol(symbol: Symbol | undefined) {
