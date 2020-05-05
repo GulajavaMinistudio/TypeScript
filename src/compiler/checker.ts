@@ -406,6 +406,7 @@ namespace ts {
             },
             getParameterType: getTypeAtPosition,
             getPromisedTypeOfPromise,
+            getAwaitedType: type => getAwaitedType(type),
             getReturnTypeOfSignature,
             isNullableType,
             getNullableType,
@@ -4211,8 +4212,12 @@ namespace ts {
                 context.flags &= ~NodeBuilderFlags.InTypeAlias;
 
                 if (!type) {
-                    context.encounteredError = true;
-                    return undefined!; // TODO: GH#18217
+                    if (!(context.flags & NodeBuilderFlags.AllowEmptyUnionOrIntersection)) {
+                        context.encounteredError = true;
+                        return undefined!; // TODO: GH#18217
+                    }
+                    context.approximateLength += 3;
+                    return createKeywordTypeNode(SyntaxKind.AnyKeyword);
                 }
 
                 if (!(context.flags & NodeBuilderFlags.NoTypeReduction)) {
@@ -5932,7 +5937,7 @@ namespace ts {
                 function serializeSymbolWorker(symbol: Symbol, isPrivate: boolean, propertyAsAlias: boolean) {
                     const symbolName = unescapeLeadingUnderscores(symbol.escapedName);
                     const isDefault = symbol.escapedName === InternalSymbolName.Default;
-                    if (isStringANonContextualKeyword(symbolName) && !isDefault) {
+                    if (!(context.flags & NodeBuilderFlags.AllowAnonymousIdentifier) && isStringANonContextualKeyword(symbolName) && !isDefault) {
                         // Oh no. We cannot use this symbol's name as it's name... It's likely some jsdoc had an invalid name like `export` or `default` :(
                         context.encounteredError = true;
                         // TODO: Issue error via symbol tracker?
@@ -9700,7 +9705,7 @@ namespace ts {
             const indexTypes: Type[] = [];
             let isAnyReadonly = false;
             for (const type of types) {
-                const indexInfo = getIndexInfoOfType(type, kind);
+                const indexInfo = getIndexInfoOfType(getApparentType(type), kind);
                 if (!indexInfo) {
                     return undefined;
                 }
@@ -10534,7 +10539,6 @@ namespace ts {
             let propSet: Map<Symbol> | undefined;
             let indexTypes: Type[] | undefined;
             const isUnion = containingType.flags & TypeFlags.Union;
-            const excludeModifiers = isUnion ? ModifierFlags.NonPublicAccessibilityModifier : 0;
             // Flags we want to propagate to the result if they exist in all source symbols
             let optionalFlag = isUnion ? SymbolFlags.None : SymbolFlags.Optional;
             let syntheticFlag = CheckFlags.SyntheticMethod;
@@ -10544,7 +10548,7 @@ namespace ts {
                 if (!(type === errorType || type.flags & TypeFlags.Never)) {
                     const prop = getPropertyOfType(type, name);
                     const modifiers = prop ? getDeclarationModifierFlagsFromSymbol(prop) : 0;
-                    if (prop && !(modifiers & excludeModifiers)) {
+                    if (prop) {
                         if (isUnion) {
                             optionalFlag |= (prop.flags & SymbolFlags.Optional);
                         }
@@ -10589,7 +10593,9 @@ namespace ts {
                     }
                 }
             }
-            if (!singleProp) {
+            if (!singleProp || isUnion && (propSet || checkFlags & CheckFlags.Partial) && checkFlags & (CheckFlags.ContainsPrivate | CheckFlags.ContainsProtected)) {
+                // No property was found, or, in a union, a property has a private or protected declaration in one
+                // constituent, but is missing or has a different declaration in another constituent.
                 return undefined;
             }
             if (!propSet && !(checkFlags & CheckFlags.ReadPartial) && !indexTypes) {
@@ -28447,6 +28453,12 @@ namespace ts {
                                 case SyntaxKind.GreaterThanGreaterThanGreaterThanToken:
                                 case SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken:
                                     reportOperatorError();
+                                    break;
+                                case SyntaxKind.AsteriskAsteriskToken:
+                                case SyntaxKind.AsteriskAsteriskEqualsToken:
+                                    if (languageVersion < ScriptTarget.ES2016) {
+                                        error(errorNode, Diagnostics.Exponentiation_cannot_be_performed_on_bigint_values_unless_the_target_option_is_set_to_es2016_or_later);
+                                    }
                             }
                             resultType = bigintType;
                         }
@@ -30789,7 +30801,7 @@ namespace ts {
                 if (globalPromiseType !== emptyGenericType && !isReferenceToType(returnType, globalPromiseType)) {
                     // The promise type was not a valid type reference to the global promise type, so we
                     // report an error and return the unknown type.
-                    error(returnTypeNode, Diagnostics.The_return_type_of_an_async_function_or_method_must_be_the_global_Promise_T_type);
+                    error(returnTypeNode, Diagnostics.The_return_type_of_an_async_function_or_method_must_be_the_global_Promise_T_type_Did_you_mean_to_write_Promise_0, typeToString(getAwaitedType(returnType) || voidType));
                     return;
                 }
             }
@@ -37036,10 +37048,9 @@ namespace ts {
                         return grammarErrorOnNode(parameter.name, Diagnostics.A_rest_parameter_cannot_have_an_initializer);
                     }
                 }
-                else if (parameter.questionToken) {
+                else if (isOptionalParameter(parameter)) {
                     seenOptionalParameter = true;
-
-                    if (parameter.initializer) {
+                    if (parameter.questionToken && parameter.initializer) {
                         return grammarErrorOnNode(parameter.name, Diagnostics.Parameter_cannot_have_question_mark_and_initializer);
                     }
                 }
