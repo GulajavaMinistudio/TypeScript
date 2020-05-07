@@ -1889,7 +1889,9 @@ namespace ts {
                             lastLocation === (location as BindingElement).name && isBindingPattern(lastLocation))) {
                             const root = getRootDeclaration(location);
                             if (root.kind === SyntaxKind.Parameter) {
-                                associatedDeclarationForContainingInitializerOrBindingName = location as BindingElement;
+                                if (!associatedDeclarationForContainingInitializerOrBindingName) {
+                                    associatedDeclarationForContainingInitializerOrBindingName = location as BindingElement;
+                                }
                             }
                         }
                         break;
@@ -20593,14 +20595,15 @@ namespace ts {
             }
 
             function isMatchingReferenceDiscriminant(expr: Expression, computedType: Type) {
-                if (!(computedType.flags & TypeFlags.Union) || !isAccessExpression(expr)) {
+                const type = declaredType.flags & TypeFlags.Union ? declaredType : computedType;
+                if (!(type.flags & TypeFlags.Union) || !isAccessExpression(expr)) {
                     return false;
                 }
                 const name = getAccessedPropertyName(expr);
                 if (name === undefined) {
                     return false;
                 }
-                return isMatchingReference(reference, expr.expression) && isDiscriminantProperty(computedType, name);
+                return isMatchingReference(reference, expr.expression) && isDiscriminantProperty(type, name);
             }
 
             function narrowTypeByDiscriminant(type: Type, access: AccessExpression, narrowType: (t: Type) => Type): Type {
@@ -20626,7 +20629,7 @@ namespace ts {
                 if (strictNullChecks && assumeTrue && optionalChainContainsReference(expr, reference)) {
                     type = getTypeWithFacts(type, TypeFacts.NEUndefinedOrNull);
                 }
-                if (isMatchingReferenceDiscriminant(expr, declaredType)) {
+                if (isMatchingReferenceDiscriminant(expr, type)) {
                     return narrowTypeByDiscriminant(type, <AccessExpression>expr, t => getTypeWithFacts(t, assumeTrue ? TypeFacts.Truthy : TypeFacts.Falsy));
                 }
                 return type;
@@ -20682,10 +20685,10 @@ namespace ts {
                                 type = narrowTypeByOptionalChainContainment(type, operator, left, assumeTrue);
                             }
                         }
-                        if (isMatchingReferenceDiscriminant(left, declaredType)) {
+                        if (isMatchingReferenceDiscriminant(left, type)) {
                             return narrowTypeByDiscriminant(type, <AccessExpression>left, t => narrowTypeByEquality(t, operator, right, assumeTrue));
                         }
-                        if (isMatchingReferenceDiscriminant(right, declaredType)) {
+                        if (isMatchingReferenceDiscriminant(right, type)) {
                             return narrowTypeByDiscriminant(type, <AccessExpression>right, t => narrowTypeByEquality(t, operator, left, assumeTrue));
                         }
                         if (isMatchingConstructorReference(left)) {
@@ -20803,29 +20806,8 @@ namespace ts {
                 const facts = assumeTrue ?
                     typeofEQFacts.get(literal.text) || TypeFacts.TypeofEQHostObject :
                     typeofNEFacts.get(literal.text) || TypeFacts.TypeofNEHostObject;
-                return getTypeWithFacts(assumeTrue ? mapType(type, narrowTypeForTypeof) : type, facts);
-
-                function narrowTypeForTypeof(type: Type) {
-                    // We narrow a non-union type to an exact primitive type if the non-union type
-                    // is a supertype of that primitive type. For example, type 'any' can be narrowed
-                    // to one of the primitive types.
-                    const targetType = literal.text === "function" ? globalFunctionType : typeofTypesByName.get(literal.text);
-                    if (targetType) {
-                        if (isTypeSubtypeOf(type, targetType)) {
-                            return type;
-                        }
-                        if (isTypeSubtypeOf(targetType, type)) {
-                            return targetType;
-                        }
-                        if (type.flags & TypeFlags.Instantiable) {
-                            const constraint = getBaseConstraintOfType(type) || anyType;
-                            if (isTypeSubtypeOf(targetType, constraint)) {
-                                return getIntersectionType([type, targetType]);
-                            }
-                        }
-                    }
-                    return type;
-                }
+                const impliedType = getImpliedTypeFromTypeofGuard(type, literal.text);
+                return getTypeWithFacts(assumeTrue && impliedType ? mapType(type, narrowUnionMemberByTypeof(impliedType)) : type, facts);
             }
 
             function narrowTypeBySwitchOptionalChainContainment(type: Type, switchStatement: SwitchStatement, clauseStart: number, clauseEnd: number, clauseCheck: (type: Type) => boolean) {
@@ -20876,19 +20858,28 @@ namespace ts {
                 return caseType.flags & TypeFlags.Never ? defaultType : getUnionType([caseType, defaultType]);
             }
 
-            function getImpliedTypeFromTypeofCase(type: Type, text: string) {
+            function getImpliedTypeFromTypeofGuard(type: Type, text: string) {
                 switch (text) {
                     case "function":
                         return type.flags & TypeFlags.Any ? type : globalFunctionType;
                     case "object":
                         return type.flags & TypeFlags.Unknown ? getUnionType([nonPrimitiveType, nullType]) : type;
                     default:
-                        return typeofTypesByName.get(text) || type;
+                        return typeofTypesByName.get(text);
                 }
             }
 
-            function narrowTypeForTypeofSwitch(candidate: Type) {
+            // When narrowing a union type by a `typeof` guard using type-facts alone, constituent types that are
+            // super-types of the implied guard will be retained in the final type: this is because type-facts only
+            // filter. Instead, we would like to replace those union constituents with the more precise type implied by
+            // the guard. For example: narrowing `{} | undefined` by `"boolean"` should produce the type `boolean`, not
+            // the filtered type `{}`. For this reason we narrow constituents of the union individually, in addition to
+            // filtering by type-facts.
+            function narrowUnionMemberByTypeof(candidate: Type) {
                 return (type: Type) => {
+                    if (isTypeSubtypeOf(type, candidate)) {
+                        return type;
+                    }
                     if (isTypeSubtypeOf(candidate, type)) {
                         return candidate;
                     }
@@ -20913,11 +20904,9 @@ namespace ts {
                 let clauseWitnesses: string[];
                 let switchFacts: TypeFacts;
                 if (defaultCaseLocation > -1) {
-                    // We no longer need the undefined denoting an
-                    // explicit default case. Remove the undefined and
-                    // fix-up clauseStart and clauseEnd.  This means
-                    // that we don't have to worry about undefined
-                    // in the witness array.
+                    // We no longer need the undefined denoting an explicit default case. Remove the undefined and
+                    // fix-up clauseStart and clauseEnd.  This means that we don't have to worry about undefined in the
+                    // witness array.
                     const witnesses = <string[]>switchWitnesses.filter(witness => witness !== undefined);
                     // The adjusted clause start and end after removing the `default` statement.
                     const fixedClauseStart = defaultCaseLocation < clauseStart ? clauseStart - 1 : clauseStart;
@@ -20960,11 +20949,8 @@ namespace ts {
                   boolean. We know that number cannot be selected
                   because it is caught in the first clause.
                 */
-                let impliedType = getTypeWithFacts(getUnionType(clauseWitnesses.map(text => getImpliedTypeFromTypeofCase(type, text))), switchFacts);
-                if (impliedType.flags & TypeFlags.Union) {
-                    impliedType = getAssignmentReducedType(impliedType as UnionType, getBaseConstraintOrType(type));
-                }
-                return getTypeWithFacts(mapType(type, narrowTypeForTypeofSwitch(impliedType)), switchFacts);
+                const impliedType = getTypeWithFacts(getUnionType(clauseWitnesses.map(text => getImpliedTypeFromTypeofGuard(type, text) || type)), switchFacts);
+                return getTypeWithFacts(mapType(type, narrowUnionMemberByTypeof(impliedType)), switchFacts);
             }
 
             function isMatchingConstructorReference(expr: Expression) {
@@ -21107,7 +21093,7 @@ namespace ts {
                             !(getTypeFacts(predicate.type) & TypeFacts.EQUndefined)) {
                             type = getTypeWithFacts(type, TypeFacts.NEUndefinedOrNull);
                         }
-                        if (isMatchingReferenceDiscriminant(predicateArgument, declaredType)) {
+                        if (isMatchingReferenceDiscriminant(predicateArgument, type)) {
                             return narrowTypeByDiscriminant(type, predicateArgument as AccessExpression, t => getNarrowedType(t, predicate.type!, assumeTrue, isTypeSubtypeOf));
                         }
                     }
@@ -21149,7 +21135,7 @@ namespace ts {
                 if (isMatchingReference(reference, expr)) {
                     return getTypeWithFacts(type, assumePresent ? TypeFacts.NEUndefinedOrNull : TypeFacts.EQUndefinedOrNull);
                 }
-                if (isMatchingReferenceDiscriminant(expr, declaredType)) {
+                if (isMatchingReferenceDiscriminant(expr, type)) {
                     return narrowTypeByDiscriminant(type, <AccessExpression>expr, t => getTypeWithFacts(t, assumePresent ? TypeFacts.NEUndefinedOrNull : TypeFacts.EQUndefinedOrNull));
                 }
                 return type;
@@ -27777,7 +27763,7 @@ namespace ts {
                 error(expr, Diagnostics.The_operand_of_a_delete_operator_must_be_a_property_reference);
                 return booleanType;
             }
-            if (expr.kind === SyntaxKind.PropertyAccessExpression && isPrivateIdentifier((expr as PropertyAccessExpression).name)) {
+            if (expr.kind === SyntaxKind.PropertyAccessExpression && isPrivateIdentifier(expr.name)) {
                 error(expr, Diagnostics.The_operand_of_a_delete_operator_cannot_be_a_private_identifier);
             }
             const links = getNodeLinks(expr);
@@ -28033,7 +28019,8 @@ namespace ts {
             // The in operator requires the left operand to be of type Any, the String primitive type, or the Number primitive type,
             // and the right operand to be of type Any, an object type, or a type parameter type.
             // The result is always of the Boolean primitive type.
-            if (!(isTypeComparableTo(leftType, stringType) || isTypeAssignableToKind(leftType, TypeFlags.NumberLike | TypeFlags.ESSymbolLike))) {
+            if (!(allTypesAssignableToKind(leftType, TypeFlags.StringLike | TypeFlags.NumberLike | TypeFlags.ESSymbolLike) ||
+                  isTypeAssignableToKind(leftType, TypeFlags.Index | TypeFlags.TypeParameter))) {
                 error(left, Diagnostics.The_left_hand_side_of_an_in_expression_must_be_of_type_any_string_number_or_symbol);
             }
             if (!allTypesAssignableToKind(rightType, TypeFlags.NonPrimitive | TypeFlags.InstantiableNonPrimitive)) {
