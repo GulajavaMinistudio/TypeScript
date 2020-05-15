@@ -7594,7 +7594,7 @@ namespace ts {
 
             if (isPropertyDeclaration(declaration) && (noImplicitAny || isInJSFile(declaration))) {
                 // We have a property declaration with no type annotation or initializer, in noImplicitAny mode or a .js file.
-                // Use control flow analysis of this.xxx assignments the constructor to determine the type of the property.
+                // Use control flow analysis of this.xxx assignments in the constructor to determine the type of the property.
                 const constructor = findConstructorDeclaration(declaration.parent);
                 const type = constructor ? getFlowTypeInConstructor(declaration.symbol, constructor) :
                     getEffectiveModifierFlags(declaration) & ModifierFlags.Ambient ? getTypeOfPropertyInBaseClass(declaration.symbol) :
@@ -7619,7 +7619,7 @@ namespace ts {
         }
 
         function isConstructorDeclaredProperty(symbol: Symbol) {
-            // A propery is considered a constructor declared property when all declaration sites are this.xxx assignments,
+            // A property is considered a constructor declared property when all declaration sites are this.xxx assignments,
             // when no declaration sites have JSDoc type annotations, and when at least one declaration site is in the body of
             // a class constructor.
             if (symbol.valueDeclaration && isBinaryExpression(symbol.valueDeclaration)) {
@@ -10562,7 +10562,7 @@ namespace ts {
             // Since getApparentType may return a non-reduced union or intersection type, we need to perform
             // type reduction both before and after obtaining the apparent type. For example, given a type parameter
             // 'T extends A | B', the type 'T & X' becomes 'A & X | B & X' after obtaining the apparent type, and
-            // that type may need futher reduction to remove empty intersections.
+            // that type may need further reduction to remove empty intersections.
             return getReducedType(getApparentType(getReducedType(type)));
         }
 
@@ -23592,7 +23592,7 @@ namespace ts {
             for (const right of getPropertiesOfType(type)) {
                 const left = props.get(right.escapedName);
                 const rightType = getTypeOfSymbol(right);
-                if (left && !maybeTypeOfKind(rightType, TypeFlags.Nullable) && !(maybeTypeOfKind(rightType, TypeFlags.Any) && right.flags & SymbolFlags.Optional)) {
+                if (left && !maybeTypeOfKind(rightType, TypeFlags.Nullable) && !(maybeTypeOfKind(rightType, TypeFlags.AnyOrUnknown) && right.flags & SymbolFlags.Optional)) {
                     const diagnostic = error(left.valueDeclaration, Diagnostics._0_is_specified_more_than_once_so_this_usage_will_be_overwritten, unescapeLeadingUnderscores(left.escapedName));
                     addRelatedInfo(diagnostic, createDiagnosticForNode(spread, Diagnostics.This_spread_always_overwrites_this_property));
                 }
