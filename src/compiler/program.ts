@@ -1530,7 +1530,7 @@ namespace ts {
         function getPrependNodes() {
             return createPrependNodes(
                 projectReferences,
-                (_ref, index) => resolvedProjectReferences![index]!.commandLine,
+                (_ref, index) => resolvedProjectReferences![index]?.commandLine,
                 fileName => {
                     const path = toPath(fileName);
                     const sourceFile = getSourceFileByPath(path);
@@ -3194,6 +3194,15 @@ namespace ts {
             }
             else if (options.reactNamespace && !isIdentifierText(options.reactNamespace, languageVersion)) {
                 createOptionValueDiagnostic("reactNamespace", Diagnostics.Invalid_value_for_reactNamespace_0_is_not_a_valid_identifier, options.reactNamespace);
+            }
+
+            if (options.jsxFragmentFactory) {
+                if (!options.jsxFactory) {
+                    createDiagnosticForOptionName(Diagnostics.Option_0_cannot_be_specified_without_specifying_option_1, "jsxFragmentFactory", "jsxFactory");
+                }
+                if (!parseIsolatedEntityName(options.jsxFragmentFactory, languageVersion)) {
+                    createOptionValueDiagnostic("jsxFragmentFactory", Diagnostics.Invalid_value_for_jsxFragmentFactory_0_is_not_a_valid_identifier_or_qualified_name, options.jsxFragmentFactory);
+                }
             }
 
             // If the emit is enabled make sure that every output file is unique and not overwriting any of the input files
