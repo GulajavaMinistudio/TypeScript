@@ -867,6 +867,11 @@
         "category": "Error",
         "code": 1261
     },
+    "Identifier expected. '{0}' is a reserved word at the top-level of a module.": {
+        "category": "Error",
+        "code": 1262
+    },
+
     "'with' statements are not allowed in an async function block.": {
         "category": "Error",
         "code": 1300
@@ -4458,6 +4463,10 @@
         "category": "Error",
         "code": 6309
     },
+    "Referenced project '{0}' may not disable emit.": {
+        "category": "Error",
+        "code": 6310
+    },
     "Project '{0}' is out of date because oldest output '{1}' is older than newest input '{2}'": {
         "category": "Message",
         "code": 6350
@@ -4597,6 +4606,11 @@
     "Have recompiles in '--incremental' and '--watch' assume that changes within a file will only affect files directly depending on it.": {
         "category": "Message",
         "code": 6384
+    },
+    "'{0}' is deprecated": {
+        "category": "Suggestion",
+        "code": 6385,
+        "reportsDeprecated": true
     },
 
     "The expected type comes from property '{0}' which is declared here on type '{1}'": {
@@ -5736,6 +5750,10 @@
     "Convert to arrow function": {
         "category": "Message",
         "code": 95125
+    },
+    "Remove parentheses": {
+        "category": "Message",
+        "code": 95126
     },
 
     "No value exists in scope for the shorthand property '{0}'. Either declare one or provide an initializer.": {
