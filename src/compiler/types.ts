@@ -5050,6 +5050,8 @@ namespace ts {
         resolvedBaseConstructorType?: Type;               // Resolved base constructor type of class
         /* @internal */
         resolvedBaseTypes: BaseType[];                    // Resolved base types
+        /* @internal */
+        baseTypesResolved?: boolean;
     }
 
     // Object type or intersection of object types
@@ -5669,6 +5671,7 @@ namespace ts {
         disableSizeLimit?: boolean;
         disableSourceOfProjectReferenceRedirect?: boolean;
         disableSolutionSearching?: boolean;
+        disableReferencedProjectLoad?: boolean;
         downlevelIteration?: boolean;
         emitBOM?: boolean;
         emitDecoratorMetadata?: boolean;
