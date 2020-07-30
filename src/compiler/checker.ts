@@ -5777,7 +5777,7 @@ namespace ts {
                                     /*decorators*/ undefined,
                                     /*modifiers*/ undefined,
                                     getEffectiveDotDotDotForParameter(p),
-                                    p.name || getEffectiveDotDotDotForParameter(p) ? `args` : `arg${i}`,
+                                    getNameForJSDocFunctionParameter(p, i),
                                     p.questionToken,
                                     visitNode(p.type, visitExistingNodeTreeSymbols),
                                     /*initializer*/ undefined
@@ -5792,7 +5792,7 @@ namespace ts {
                                     /*decorators*/ undefined,
                                     /*modifiers*/ undefined,
                                     getEffectiveDotDotDotForParameter(p),
-                                    p.name || getEffectiveDotDotDotForParameter(p) ? `args` : `arg${i}`,
+                                    getNameForJSDocFunctionParameter(p, i),
                                     p.questionToken,
                                     visitNode(p.type, visitExistingNodeTreeSymbols),
                                     /*initializer*/ undefined
@@ -5845,6 +5845,13 @@ namespace ts {
 
                     function getEffectiveDotDotDotForParameter(p: ParameterDeclaration) {
                         return p.dotDotDotToken || (p.type && isJSDocVariadicType(p.type) ? factory.createToken(SyntaxKind.DotDotDotToken) : undefined);
+                    }
+
+                    /** Note that `new:T` parameters are not handled, but should be before calling this function. */
+                    function getNameForJSDocFunctionParameter(p: ParameterDeclaration, index: number) {
+                        return p.name && isIdentifier(p.name) && p.name.escapedText === "this" ? "this"
+                            : getEffectiveDotDotDotForParameter(p) ? `args`
+                            : `arg${index}`;
                     }
 
                     function rewriteModuleSpecifier(parent: ImportTypeNode, lit: StringLiteral) {
@@ -26370,7 +26377,8 @@ namespace ts {
                 if (paramDecl) {
                     related = createDiagnosticForNode(
                         paramDecl,
-                        isBindingPattern(paramDecl.name) ? Diagnostics.An_argument_matching_this_binding_pattern_was_not_provided : Diagnostics.An_argument_for_0_was_not_provided,
+                        isBindingPattern(paramDecl.name) ? Diagnostics.An_argument_matching_this_binding_pattern_was_not_provided :
+                            isRestParameter(paramDecl) ? Diagnostics.Arguments_for_the_rest_parameter_0_were_not_provided : Diagnostics.An_argument_for_0_was_not_provided,
                         !paramDecl.name ? argCount : !isBindingPattern(paramDecl.name) ? idText(getFirstIdentifier(paramDecl.name)) : undefined
                     );
                 }
@@ -31280,6 +31288,7 @@ namespace ts {
             let duplicateFunctionDeclaration = false;
             let multipleConstructorImplementation = false;
             let hasNonAmbientClass = false;
+            const functionDeclarations = [] as Declaration[];
             for (const current of declarations) {
                 const node = <SignatureDeclaration | ClassDeclaration | ClassExpression>current;
                 const inAmbientContext = node.flags & NodeFlags.Ambient;
@@ -31300,13 +31309,15 @@ namespace ts {
                 }
 
                 if (node.kind === SyntaxKind.FunctionDeclaration || node.kind === SyntaxKind.MethodDeclaration || node.kind === SyntaxKind.MethodSignature || node.kind === SyntaxKind.Constructor) {
+                    functionDeclarations.push(node);
                     const currentNodeFlags = getEffectiveDeclarationFlags(node, flagsToCheck);
                     someNodeFlags |= currentNodeFlags;
                     allNodeFlags &= currentNodeFlags;
                     someHaveQuestionToken = someHaveQuestionToken || hasQuestionToken(node);
                     allHaveQuestionToken = allHaveQuestionToken && hasQuestionToken(node);
+                    const bodyIsPresent = nodeIsPresent((node as FunctionLikeDeclaration).body);
 
-                    if (nodeIsPresent((node as FunctionLikeDeclaration).body) && bodyDeclaration) {
+                    if (bodyIsPresent && bodyDeclaration) {
                         if (isConstructor) {
                             multipleConstructorImplementation = true;
                         }
@@ -31314,11 +31325,11 @@ namespace ts {
                             duplicateFunctionDeclaration = true;
                         }
                     }
-                    else if (previousDeclaration && previousDeclaration.parent === node.parent && previousDeclaration.end !== node.pos) {
+                    else if (previousDeclaration?.parent === node.parent && previousDeclaration.end !== node.pos) {
                         reportImplementationExpectedError(previousDeclaration);
                     }
 
-                    if (nodeIsPresent((node as FunctionLikeDeclaration).body)) {
+                    if (bodyIsPresent) {
                         if (!bodyDeclaration) {
                             bodyDeclaration = node as FunctionLikeDeclaration;
                         }
@@ -31336,14 +31347,14 @@ namespace ts {
             }
 
             if (multipleConstructorImplementation) {
-                forEach(declarations, declaration => {
+                forEach(functionDeclarations, declaration => {
                     error(declaration, Diagnostics.Multiple_constructor_implementations_are_not_allowed);
                 });
             }
 
             if (duplicateFunctionDeclaration) {
-                forEach(declarations, declaration => {
-                    error(getNameOfDeclaration(declaration), Diagnostics.Duplicate_function_implementation);
+                forEach(functionDeclarations, declaration => {
+                    error(getNameOfDeclaration(declaration) || declaration, Diagnostics.Duplicate_function_implementation);
                 });
             }
 
