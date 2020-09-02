@@ -1869,7 +1869,7 @@ namespace ts {
 
     export function getExternalModuleRequireArgument(node: Node) {
         return isRequireVariableDeclaration(node, /*requireStringLiteralLikeArgument*/ true)
-            && (getLeftmostPropertyAccessExpression(node.initializer) as CallExpression).arguments[0] as StringLiteral;
+            && (getLeftmostAccessExpression(node.initializer) as CallExpression).arguments[0] as StringLiteral;
     }
 
     export function isInternalModuleImportEqualsDeclaration(node: Node): node is ImportEqualsDeclaration {
@@ -1940,7 +1940,7 @@ namespace ts {
     export function isRequireVariableDeclaration(node: Node, requireStringLiteralLikeArgument: boolean): node is VariableDeclaration;
     export function isRequireVariableDeclaration(node: Node, requireStringLiteralLikeArgument: boolean): node is VariableDeclaration {
         node = getRootDeclaration(node);
-        return isVariableDeclaration(node) && !!node.initializer && isRequireCall(getLeftmostPropertyAccessExpression(node.initializer), requireStringLiteralLikeArgument);
+        return isVariableDeclaration(node) && !!node.initializer && isRequireCall(getLeftmostAccessExpression(node.initializer), requireStringLiteralLikeArgument);
     }
 
     export function isRequireVariableStatement(node: Node, requireStringLiteralLikeArgument = true): node is RequireVariableStatement {
@@ -5463,8 +5463,8 @@ namespace ts {
         return node.kind === SyntaxKind.NamedImports || node.kind === SyntaxKind.NamedExports;
     }
 
-    export function getLeftmostPropertyAccessExpression(expr: Expression): Expression {
-        while (isPropertyAccessExpression(expr)) {
+    export function getLeftmostAccessExpression(expr: Expression): Expression {
+        while (isAccessExpression(expr)) {
             expr = expr.expression;
         }
         return expr;
@@ -5933,6 +5933,10 @@ namespace ts {
         return compilerOptions[flag] === undefined ? !!compilerOptions.strict : !!compilerOptions[flag];
     }
 
+    export function getAllowJSCompilerOption(compilerOptions: CompilerOptions): boolean {
+        return compilerOptions.allowJs === undefined ? !!compilerOptions.checkJs : compilerOptions.allowJs;
+    }
+
     export function compilerOptionsAffectSemanticDiagnostics(newOptions: CompilerOptions, oldOptions: CompilerOptions): boolean {
         return oldOptions !== newOptions &&
             semanticDiagnosticsOptionDeclarations.some(option => !isJsonEqual(getCompilerOptionValue(oldOptions, option), getCompilerOptionValue(newOptions, option)));
@@ -6386,7 +6390,7 @@ namespace ts {
     export function getSupportedExtensions(options?: CompilerOptions): readonly Extension[];
     export function getSupportedExtensions(options?: CompilerOptions, extraFileExtensions?: readonly FileExtensionInfo[]): readonly string[];
     export function getSupportedExtensions(options?: CompilerOptions, extraFileExtensions?: readonly FileExtensionInfo[]): readonly string[] {
-        const needJsExtensions = options && options.allowJs;
+        const needJsExtensions = options && getAllowJSCompilerOption(options);
 
         if (!extraFileExtensions || extraFileExtensions.length === 0) {
             return needJsExtensions ? allSupportedExtensions : supportedTSExtensions;
