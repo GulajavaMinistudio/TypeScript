@@ -107,12 +107,12 @@ function fa2<T, U extends T, A extends string, B extends A>(x: { [P in B as `p_$
 
 // String transformations using recursive conditional types
 
-type Join<T extends (string | number | boolean | bigint)[], D extends string> =
+type Join<T extends unknown[], D extends string> =
 >Join : Join<T, D>
 
     T extends [] ? '' :
-    T extends [unknown] ? `${T[0]}` :
-    T extends [unknown, ...infer U] ? `${T[0]}${D}${Join<U, D>}` :
+    T extends [string | number | boolean | bigint] ? `${T[0]}` :
+    T extends [string | number | boolean | bigint, ...infer U] ? `${T[0]}${D}${Join<U, D>}` :
     string;
 
 type TJ1 = Join<[1, 2, 3, 4], '.'>
@@ -395,6 +395,11 @@ type S1<T> = T extends `foo${infer U}bar` ? S2<U> : never;
 type S2<S extends string> = S;
 >S2 : S
 
+// Check that infer T declarations are validated
+
+type TV1 = `${infer X}`;
+>TV1 : `${X}`
+
 // Batched single character inferences for lower recursion depth
 
 type Chars<S extends string> =
@@ -408,6 +413,23 @@ type Chars<S extends string> =
 
 type L1 = Chars<'FooBarBazThisIsALongerString'>;  // ['F', 'o', 'o', 'B', 'a', 'r', ...]
 >L1 : ["F", "o", "o", "B", "a", "r", "B", "a", "z", "T", "h", "i", "s", "I", "s", "A", "L", "o", "n", "g", "e", "r", "S", "t", "r", "i", "n", "g"]
+
+// Infer never when source isn't a literal type that matches the pattern
+
+type Foo<T> = T extends `*${infer S}*` ? S : never;
+>Foo : Foo<T>
+
+type TF1 = Foo<any>;      // never
+>TF1 : never
+
+type TF2 = Foo<string>;   // never
+>TF2 : never
+
+type TF3 = Foo<'abc'>;    // never
+>TF3 : never
+
+type TF4 = Foo<'*abc*'>;  // 'abc'
+>TF4 : "abc"
 
 // Cross product unions limited to 100,000 constituents
 
