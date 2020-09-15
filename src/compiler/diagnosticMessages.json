@@ -3039,6 +3039,10 @@
         "category": "Error",
         "code": 2793
     },
+    "Expected {0} arguments, but got {1}. Did you forget to include 'void' in your type argument to 'Promise'?": {
+        "category": "Error",
+        "code": 2794
+    },
 
     "Import declaration '{0}' is using private name '{1}'.": {
         "category": "Error",
@@ -4920,6 +4924,10 @@
         "category": "Error",
         "code": 7055
     },
+    "The inferred type of this node exceeds the maximum length the compiler will serialize. An explicit type annotation is needed.": {
+        "category": "Error",
+        "code": 7056
+    },
 
     "You cannot rename this element.": {
         "category": "Error",
@@ -5922,6 +5930,14 @@
     "Can only convert logical AND access chains": {
         "category": "Message",
         "code": 95142
+    },
+    "Add 'void' to Promise resolved without a value": {
+        "category": "Message",
+        "code": 95143
+    },
+    "Add 'void' to all Promises resolved without a value": {
+        "category": "Message",
+        "code": 95144
     },
 
     "No value exists in scope for the shorthand property '{0}'. Either declare one or provide an initializer.": {
