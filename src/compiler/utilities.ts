@@ -100,28 +100,6 @@ namespace ts {
             !isJsonEqual(getCompilerOptionValue(oldOptions, o), getCompilerOptionValue(newOptions, o)));
     }
 
-    /**
-     * Iterates through the parent chain of a node and performs the callback on each parent until the callback
-     * returns a truthy value, then returns that value.
-     * If no such value is found, it applies the callback until the parent pointer is undefined or the callback returns "quit"
-     * At that point findAncestor returns undefined.
-     */
-    export function findAncestor<T extends Node>(node: Node | undefined, callback: (element: Node) => element is T): T | undefined;
-    export function findAncestor(node: Node | undefined, callback: (element: Node) => boolean | "quit"): Node | undefined;
-    export function findAncestor(node: Node, callback: (element: Node) => boolean | "quit"): Node | undefined {
-        while (node) {
-            const result = callback(node);
-            if (result === "quit") {
-                return undefined;
-            }
-            else if (result) {
-                return node;
-            }
-            node = node.parent;
-        }
-        return undefined;
-    }
-
     export function forEachAncestor<T>(node: Node, callback: (n: Node) => T | undefined | "quit"): T | undefined {
         while (true) {
             const res = callback(node);
@@ -2728,6 +2706,20 @@ namespace ts {
 
     export function walkUpParenthesizedExpressions(node: Node) {
         return walkUp(node, SyntaxKind.ParenthesizedExpression);
+    }
+
+    /**
+     * Walks up parenthesized types.
+     * It returns both the outermost parenthesized type and its parent.
+     * If given node is not a parenthesiezd type, undefined is return as the former.
+     */
+    export function walkUpParenthesizedTypesAndGetParentAndChild(node: Node): [ParenthesizedTypeNode | undefined, Node] {
+        let child: ParenthesizedTypeNode | undefined;
+        while (node && node.kind === SyntaxKind.ParenthesizedType) {
+            child = <ParenthesizedTypeNode>node;
+            node = node.parent;
+        }
+        return [child, node];
     }
 
     export function skipParentheses(node: Expression): Expression;
