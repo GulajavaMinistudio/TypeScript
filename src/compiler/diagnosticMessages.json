@@ -2197,6 +2197,10 @@
         "category": "Error",
         "code": 2549
     },
+    "Property '{0}' does not exist on type '{1}'. Do you need to change your target library? Try changing the `lib` compiler option to '{2}' or later.": {
+        "category": "Error",
+        "code": 2550
+    },
     "Property '{0}' does not exist on type '{1}'. Did you mean '{2}'?": {
         "category": "Error",
         "code": 2551
@@ -2313,7 +2317,7 @@
         "category": "Error",
         "code": 2582
     },
-    "Cannot find name '{0}'. Do you need to change your target library? Try changing the `lib` compiler option to es2015 or later.": {
+    "Cannot find name '{0}'. Do you need to change your target library? Try changing the `lib` compiler option to '{1}' or later.": {
         "category": "Error",
         "code": 2583
     },
@@ -3047,6 +3051,10 @@
     "The 'intrinsic' keyword can only be used to declare compiler provided intrinsic types.": {
         "category": "Error",
         "code": 2795
+    },
+    "It is likely that you are missing a comma to separate these two template expressions. They form a tagged template expression which cannot be invoked.": {
+        "category": "Error",
+        "code": 2796
     },
 
     "Import declaration '{0}' is using private name '{1}'.": {
