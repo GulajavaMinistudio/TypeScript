@@ -6788,16 +6788,16 @@ namespace ts {
                             if (isPropertyAccessExpression((node as VariableDeclaration).initializer!)) {
                                 // const x = require('y').z
                                 const initializer = (node as VariableDeclaration).initializer! as PropertyAccessExpression; // require('y').z
-                                const uniqueName = factory.createUniqueName((getExternalModuleRequireArgument(node) as StringLiteral).text); // _y
+                                const uniqueName = factory.createUniqueName(localName); // _x
                                 const specifier = getSpecifierForModuleSymbol(target.parent || target, context); // 'y'
-                                // import _y = require('y');
+                                // import _x = require('y');
                                 addResult(factory.createImportEqualsDeclaration(
                                     /*decorators*/ undefined,
                                     /*modifiers*/ undefined,
                                     uniqueName,
                                     factory.createExternalModuleReference(factory.createStringLiteral(specifier))
                                 ), ModifierFlags.None);
-                                // import x = _y.z
+                                // import x = _x.z
                                 addResult(factory.createImportEqualsDeclaration(
                                     /*decorators*/ undefined,
                                     /*modifiers*/ undefined,
@@ -27335,7 +27335,7 @@ namespace ts {
 
                 const declCount = length(failed.declaration?.symbol.declarations);
                 const isOverload = declCount > 1;
-                const implDecl = isOverload ? find(failed.declaration?.symbol.declarations || emptyArray, d => nodeIsPresent((d as FunctionLikeDeclaration).body)) : undefined;
+                const implDecl = isOverload ? find(failed.declaration?.symbol.declarations || emptyArray, d => isFunctionLikeDeclaration(d) && nodeIsPresent(d.body)) : undefined;
                 if (implDecl) {
                     const candidate = getSignatureFromDeclaration(implDecl as FunctionLikeDeclaration);
                     const isSingleNonGenericCandidate = !candidate.typeParameters;
