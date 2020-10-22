@@ -13475,6 +13475,19 @@ namespace ts {
                 constraint;
         }
 
+        // Ordinarily we reduce a keyof M where M is a mapped type { [P in K as N<P>]: X } to simply N<K>. This however presumes
+        // that N distributes over union types, i.e. that N<A | B | C> is equivalent to N<A> | N<B> | N<C>. That presumption is
+        // generally true, except when N is a non-distributive conditional type or an instantiable type with non-distributive
+        // conditional type as a constituent. In those cases, we cannot reduce keyof M and need to preserve it as is.
+        function isNonDistributiveNameType(type: Type | undefined): boolean {
+            return !!(type && (
+                type.flags & TypeFlags.Conditional && !(<ConditionalType>type).root.isDistributive ||
+                type.flags & (TypeFlags.UnionOrIntersection | TypeFlags.TemplateLiteral) && some((<UnionOrIntersectionType | TemplateLiteralType>type).types, isNonDistributiveNameType) ||
+                type.flags & (TypeFlags.Index | TypeFlags.StringMapping) && isNonDistributiveNameType((<IndexType | StringMappingType>type).type) ||
+                type.flags & TypeFlags.IndexedAccess && isNonDistributiveNameType((<IndexedAccessType>type).indexType) ||
+                type.flags & TypeFlags.Substitution && isNonDistributiveNameType((<SubstitutionType>type).substitute)));
+        }
+
         function getLiteralTypeFromPropertyName(name: PropertyName) {
             if (isPrivateIdentifier(name)) {
                 return neverType;
@@ -13522,7 +13535,7 @@ namespace ts {
             type = getReducedType(type);
             return type.flags & TypeFlags.Union ? getIntersectionType(map((<IntersectionType>type).types, t => getIndexType(t, stringsOnly, noIndexSignatures))) :
                 type.flags & TypeFlags.Intersection ? getUnionType(map((<IntersectionType>type).types, t => getIndexType(t, stringsOnly, noIndexSignatures))) :
-                type.flags & TypeFlags.InstantiableNonPrimitive || isGenericTupleType(type) ? getIndexTypeForGenericType(<InstantiableType | UnionOrIntersectionType>type, stringsOnly) :
+                type.flags & TypeFlags.InstantiableNonPrimitive || isGenericTupleType(type) || isGenericMappedType(type) && isNonDistributiveNameType(getNameTypeFromMappedType(type)) ? getIndexTypeForGenericType(<InstantiableType | UnionOrIntersectionType>type, stringsOnly) :
                 getObjectFlags(type) & ObjectFlags.Mapped ? getIndexTypeForMappedType(<MappedType>type, noIndexSignatures) :
                 type === wildcardType ? wildcardType :
                 type.flags & TypeFlags.Unknown ? neverType :
@@ -17259,9 +17272,9 @@ namespace ts {
             }
 
             function structuredTypeRelatedTo(source: Type, target: Type, reportErrors: boolean, intersectionState: IntersectionState): Ternary {
-                tracing.begin(tracing.Phase.Check, "structuredTypeRelatedTo", { sourceId: source.id, targetId: target.id });
+                tracing.push(tracing.Phase.Check, "structuredTypeRelatedTo", { sourceId: source.id, targetId: target.id });
                 const result = structuredTypeRelatedToWorker(source, target, reportErrors, intersectionState);
-                tracing.end();
+                tracing.pop();
                 return result;
             }
 
@@ -18516,7 +18529,7 @@ namespace ts {
         function getVariancesWorker<TCache extends { variances?: VarianceFlags[] }>(typeParameters: readonly TypeParameter[] = emptyArray, cache: TCache, createMarkerType: (input: TCache, param: TypeParameter, marker: Type) => Type): VarianceFlags[] {
             let variances = cache.variances;
             if (!variances) {
-                tracing.begin(tracing.Phase.Check, "getVariancesWorker", { arity: typeParameters.length, id: (cache as any).id ?? (cache as any).declaredType?.id ?? -1 });
+                tracing.push(tracing.Phase.Check, "getVariancesWorker", { arity: typeParameters.length, id: (cache as any).id ?? (cache as any).declaredType?.id ?? -1 });
                 // The emptyArray singleton is used to signal a recursive invocation.
                 cache.variances = emptyArray;
                 variances = [];
@@ -18551,7 +18564,7 @@ namespace ts {
                     variances.push(variance);
                 }
                 cache.variances = variances;
-                tracing.end();
+                tracing.pop();
             }
             return variances;
         }
@@ -25903,18 +25916,18 @@ namespace ts {
                     relatedInfo = createDiagnosticForNode(propNode, Diagnostics.Did_you_forget_to_use_await);
                 }
                 else {
-                    const suggestion = getSuggestedSymbolForNonexistentProperty(propNode, containingType);
-                    if (suggestion !== undefined) {
-                        const suggestedName = symbolName(suggestion);
-                        errorInfo = chainDiagnosticMessages(errorInfo, Diagnostics.Property_0_does_not_exist_on_type_1_Did_you_mean_2, declarationNameToString(propNode), typeToString(containingType), suggestedName);
-                        relatedInfo = suggestion.valueDeclaration && createDiagnosticForNode(suggestion.valueDeclaration, Diagnostics._0_is_declared_here, suggestedName);
+                    const missingProperty = declarationNameToString(propNode);
+                    const container = typeToString(containingType);
+                    const libSuggestion = getSuggestedLibForNonExistentProperty(missingProperty, containingType);
+                    if (libSuggestion !== undefined) {
+                        errorInfo = chainDiagnosticMessages(errorInfo, Diagnostics.Property_0_does_not_exist_on_type_1_Do_you_need_to_change_your_target_library_Try_changing_the_lib_compiler_option_to_2_or_later, missingProperty, container, libSuggestion);
                     }
                     else {
-                        const missingProperty = declarationNameToString(propNode);
-                        const container = typeToString(containingType);
-                        const lib = getSuggestedLibForNonExistentProperty(missingProperty, containingType);
-                        if (lib) {
-                            errorInfo = chainDiagnosticMessages(errorInfo, Diagnostics.Property_0_does_not_exist_on_type_1_Do_you_need_to_change_your_target_library_Try_changing_the_lib_compiler_option_to_2_or_later, missingProperty, container, lib);
+                        const suggestion = getSuggestedSymbolForNonexistentProperty(propNode, containingType);
+                        if (suggestion !== undefined) {
+                            const suggestedName = symbolName(suggestion);
+                            errorInfo = chainDiagnosticMessages(errorInfo, Diagnostics.Property_0_does_not_exist_on_type_1_Did_you_mean_2, missingProperty, container, suggestedName);
+                            relatedInfo = suggestion.valueDeclaration && createDiagnosticForNode(suggestion.valueDeclaration, Diagnostics._0_is_declared_here, suggestedName);
                         }
                         else {
                             errorInfo = chainDiagnosticMessages(elaborateNeverIntersection(errorInfo, containingType), Diagnostics.Property_0_does_not_exist_on_type_1, missingProperty, container);
@@ -30966,7 +30979,7 @@ namespace ts {
         }
 
         function checkExpression(node: Expression | QualifiedName, checkMode?: CheckMode, forceTuple?: boolean): Type {
-            tracing.begin(tracing.Phase.Check, "checkExpression", { kind: node.kind, pos: node.pos, end: node.end });
+            tracing.push(tracing.Phase.Check, "checkExpression", { kind: node.kind, pos: node.pos, end: node.end });
             const saveCurrentNode = currentNode;
             currentNode = node;
             instantiationCount = 0;
@@ -30976,7 +30989,7 @@ namespace ts {
                 checkConstEnumAccess(node, type);
             }
             currentNode = saveCurrentNode;
-            tracing.end();
+            tracing.pop();
             return type;
         }
 
@@ -33767,10 +33780,10 @@ namespace ts {
         }
 
         function checkVariableDeclaration(node: VariableDeclaration) {
-            tracing.begin(tracing.Phase.Check, "checkVariableDeclaration", { kind: node.kind, pos: node.pos, end: node.end });
+            tracing.push(tracing.Phase.Check, "checkVariableDeclaration", { kind: node.kind, pos: node.pos, end: node.end });
             checkGrammarVariableDeclaration(node);
             checkVariableLikeDeclaration(node);
-            tracing.end();
+            tracing.pop();
         }
 
         function checkBindingElement(node: BindingElement) {
@@ -36841,12 +36854,13 @@ namespace ts {
         }
 
         function checkSourceFile(node: SourceFile) {
-            tracing.begin(tracing.Phase.Check, "checkSourceFile", { path: node.path });
+            const tracingData: tracing.EventData = [tracing.Phase.Check, "checkSourceFile", { path: node.path }];
+            tracing.begin(...tracingData);
             performance.mark("beforeCheck");
             checkSourceFileWorker(node);
             performance.mark("afterCheck");
             performance.measure("Check", "beforeCheck", "afterCheck");
-            tracing.end();
+            tracing.end(...tracingData);
         }
 
         function unusedIsError(kind: UnusedKind, isAmbient: boolean): boolean {
