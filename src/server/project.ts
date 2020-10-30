@@ -706,10 +706,10 @@ namespace ts.server {
             return this.projectName;
         }
 
-        protected removeLocalTypingsFromTypeAcquisition(newTypeAcquisition: TypeAcquisition | undefined): TypeAcquisition {
+        protected removeLocalTypingsFromTypeAcquisition(newTypeAcquisition: TypeAcquisition): TypeAcquisition {
             if (!newTypeAcquisition || !newTypeAcquisition.include) {
                 // Nothing to filter out, so just return as-is
-                return newTypeAcquisition || {};
+                return newTypeAcquisition;
             }
             return { ...newTypeAcquisition, include: this.removeExistingTypings(newTypeAcquisition.include) };
         }
@@ -1410,7 +1410,9 @@ namespace ts.server {
         }
 
         setTypeAcquisition(newTypeAcquisition: TypeAcquisition | undefined): void {
-            this.typeAcquisition = this.removeLocalTypingsFromTypeAcquisition(newTypeAcquisition);
+            if (newTypeAcquisition) {
+                this.typeAcquisition = this.removeLocalTypingsFromTypeAcquisition(newTypeAcquisition);
+            }
         }
 
         getTypeAcquisition() {
@@ -1703,9 +1705,11 @@ namespace ts.server {
 
             const dependencySelection = this.includePackageJsonAutoImports();
             if (dependencySelection) {
+                const start = timestamp();
                 this.autoImportProviderHost = AutoImportProviderProject.create(dependencySelection, this, this.getModuleResolutionHostForAutoImportProvider(), this.documentRegistry);
                 if (this.autoImportProviderHost) {
                     updateProjectIfDirty(this.autoImportProviderHost);
+                    this.sendPerformanceEvent("CreatePackageJsonAutoImportProvider", timestamp() - start);
                     return this.autoImportProviderHost.getCurrentProgram();
                 }
             }

@@ -218,6 +218,9 @@ namespace ts {
         // or if compiler options contain alwaysStrict.
         let inStrictMode: boolean;
 
+        // If we are binding an assignment pattern, we will bind certain expressions differently.
+        let inAssignmentPattern = false;
+
         let symbolCount = 0;
 
         let Symbol: new (flags: SymbolFlags, name: __String) => Symbol;
@@ -275,6 +278,7 @@ namespace ts {
             currentExceptionTarget = undefined;
             activeLabelList = undefined;
             hasExplicitReturn = false;
+            inAssignmentPattern = false;
             emitFlags = NodeFlags.None;
         }
 
@@ -733,9 +737,14 @@ namespace ts {
         }
 
         function bindChildren(node: Node): void {
+            const saveInAssignmentPattern = inAssignmentPattern;
+            // Most nodes aren't valid in an assignment pattern, so we clear the value here
+            // and set it before we descend into nodes that could actually be part of an assignment pattern.
+            inAssignmentPattern = false;
             if (checkUnreachable(node)) {
                 bindEachChild(node);
                 bindJSDoc(node);
+                inAssignmentPattern = saveInAssignmentPattern;
                 return;
             }
             if (node.kind >= SyntaxKind.FirstStatement && node.kind <= SyntaxKind.LastStatement && !options.allowUnreachableCode) {
@@ -791,6 +800,13 @@ namespace ts {
                     bindPostfixUnaryExpressionFlow(<PostfixUnaryExpression>node);
                     break;
                 case SyntaxKind.BinaryExpression:
+                    if (isDestructuringAssignment(node)) {
+                        // Carry over whether we are in an assignment pattern to
+                        // binary expressions that could actually be an initializer
+                        inAssignmentPattern = saveInAssignmentPattern;
+                        bindDestructuringAssignmentFlow(node);
+                        return;
+                    }
                     bindBinaryExpressionFlow(<BinaryExpression>node);
                     break;
                 case SyntaxKind.DeleteExpression:
@@ -827,11 +843,23 @@ namespace ts {
                 case SyntaxKind.ModuleBlock:
                     bindEachFunctionsFirst((node as Block).statements);
                     break;
+                case SyntaxKind.BindingElement:
+                    bindBindingElementFlow(<BindingElement>node);
+                    break;
+                case SyntaxKind.ObjectLiteralExpression:
+                case SyntaxKind.ArrayLiteralExpression:
+                case SyntaxKind.PropertyAssignment:
+                case SyntaxKind.SpreadElement:
+                    // Carry over whether we are in an assignment pattern of Object and Array literals
+                    // as well as their children that are valid assignment targets.
+                    inAssignmentPattern = saveInAssignmentPattern;
+                    // falls through
                 default:
                     bindEachChild(node);
                     break;
             }
             bindJSDoc(node);
+            inAssignmentPattern = saveInAssignmentPattern;
         }
 
         function isNarrowingExpression(expr: Expression): boolean {
@@ -1337,10 +1365,14 @@ namespace ts {
 
         function bindExpressionStatement(node: ExpressionStatement): void {
             bind(node.expression);
-            // A top level call expression with a dotted function name and at least one argument
+            maybeBindExpressionFlowIfCall(node.expression);
+        }
+
+        function maybeBindExpressionFlowIfCall(node: Expression) {
+            // A top level or LHS of comma expression call expression with a dotted function name and at least one argument
             // is potentially an assertion and is therefore included in the control flow.
-            if (node.expression.kind === SyntaxKind.CallExpression) {
-                const call = <CallExpression>node.expression;
+            if (node.kind === SyntaxKind.CallExpression) {
+                const call = <CallExpression>node;
                 if (isDottedName(call.expression) && call.expression.kind !== SyntaxKind.SuperKeyword) {
                     currentFlow = createFlowCall(currentFlow, call);
                 }
@@ -1451,6 +1483,24 @@ namespace ts {
             }
         }
 
+        function bindDestructuringAssignmentFlow(node: DestructuringAssignment) {
+            if (inAssignmentPattern) {
+                inAssignmentPattern = false;
+                bind(node.operatorToken);
+                bind(node.right);
+                inAssignmentPattern = true;
+                bind(node.left);
+            }
+            else {
+                inAssignmentPattern = true;
+                bind(node.left);
+                inAssignmentPattern = false;
+                bind(node.operatorToken);
+                bind(node.right);
+            }
+            bindAssignmentTargetFlow(node.left);
+        }
+
         const enum BindBinaryExpressionFlowState {
             BindThenBindChildren,
             MaybeBindLeft,
@@ -1511,6 +1561,9 @@ namespace ts {
                         break;
                     }
                     case BindBinaryExpressionFlowState.BindToken: {
+                        if (node.operatorToken.kind === SyntaxKind.CommaToken) {
+                            maybeBindExpressionFlowIfCall(node.left);
+                        }
                         advanceState(BindBinaryExpressionFlowState.BindRight);
                         maybeBind(node.operatorToken);
                         break;
@@ -1564,7 +1617,7 @@ namespace ts {
              * If `node` is a BinaryExpression, adds it to the local work stack, otherwise recursively binds it
              */
             function maybeBind(node: Node) {
-                if (node && isBinaryExpression(node)) {
+                if (node && isBinaryExpression(node) && !isDestructuringAssignment(node)) {
                     stackIndex++;
                     workStacks.expr[stackIndex] = node;
                     workStacks.state[stackIndex] = BindBinaryExpressionFlowState.BindThenBindChildren;
@@ -1616,6 +1669,25 @@ namespace ts {
             bindEachChild(node);
             if (node.initializer || isForInOrOfStatement(node.parent.parent)) {
                 bindInitializedVariableFlow(node);
+            }
+        }
+
+        function bindBindingElementFlow(node: BindingElement) {
+            if (isBindingPattern(node.name)) {
+                // When evaluating a binding pattern, the initializer is evaluated before the binding pattern, per:
+                // - https://tc39.es/ecma262/#sec-destructuring-binding-patterns-runtime-semantics-iteratorbindinginitialization
+                //   - `BindingElement: BindingPattern Initializer?`
+                // - https://tc39.es/ecma262/#sec-runtime-semantics-keyedbindinginitialization
+                //   - `BindingElement: BindingPattern Initializer?`
+                bindEach(node.decorators);
+                bindEach(node.modifiers);
+                bind(node.dotDotDotToken);
+                bind(node.propertyName);
+                bind(node.initializer);
+                bind(node.name);
+            }
+            else {
+                bindEachChild(node);
             }
         }
 
@@ -2834,12 +2906,21 @@ namespace ts {
                 return;
             }
 
+            if (isObjectLiteralExpression(assignedExpression) && every(assignedExpression.properties, isShorthandPropertyAssignment)) {
+                forEach(assignedExpression.properties, bindExportAssignedObjectMemberAlias);
+                return;
+            }
+
             // 'module.exports = expr' assignment
             const flags = exportAssignmentIsAlias(node)
                 ? SymbolFlags.Alias // An export= with an EntityNameExpression or a ClassExpression exports all meanings of that identifier or class
                 : SymbolFlags.Property | SymbolFlags.ExportValue | SymbolFlags.ValueModule;
             const symbol = declareSymbol(file.symbol.exports!, file.symbol, node, flags | SymbolFlags.Assignment, SymbolFlags.None);
             setValueDeclaration(symbol, node);
+        }
+
+        function bindExportAssignedObjectMemberAlias(node: ShorthandPropertyAssignment) {
+            declareSymbol(file.symbol.exports!, file.symbol, node, SymbolFlags.Alias | SymbolFlags.Assignment, SymbolFlags.None);
         }
 
         function bindThisPropertyAssignment(node: BindablePropertyAssignmentExpression | PropertyAccessExpression | LiteralLikeElementAccessExpression) {
