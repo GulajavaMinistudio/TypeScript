@@ -21,7 +21,7 @@ namespace ts {
     let SourceFileConstructor: new (kind: SyntaxKind, pos?: number, end?: number) => Node;
 
     /**
-     * NOTE: You should not use this, it is only exported to support `createNode` in `~/src/compat/deprecations.ts`.
+     * NOTE: You should not use this, it is only exported to support `createNode` in `~/src/deprecatedCompat/deprecations.ts`.
      */
     /* @internal */
     export const parseBaseNodeFactory: BaseNodeFactory = {
@@ -1768,6 +1768,7 @@ namespace ts {
                 case SyntaxKind.DefaultKeyword:
                     return nextTokenCanFollowDefaultKeyword();
                 case SyntaxKind.StaticKeyword:
+                    return nextTokenIsOnSameLineAndCanFollowModifier();
                 case SyntaxKind.GetKeyword:
                 case SyntaxKind.SetKeyword:
                     nextToken();

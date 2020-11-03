@@ -136,7 +136,11 @@ exports.App = App;
       "watch": true,
       "configFilePath": "./tsconfig.json"
     },
-    "referencedMap": {},
+    "referencedMap": {
+      "./index.tsx": [
+        "./node_modules/react/jsx-runtime/index.d.ts"
+      ]
+    },
     "exportedModulesMap": {
       "./index.tsx": [
         "./node_modules/react/jsx-runtime/index.d.ts"
@@ -233,7 +237,7 @@ exports.App = App;
       },
       "./index.tsx": {
         "version": "-14760199789-export const App = () => <div propA={true}></div>;",
-        "signature": "-17269688391-export declare const App: () => import(\"react/jsx-runtime\").JSX.Element;\n",
+        "signature": "-8162467991-export declare const App: () => import(\"preact/jsx-runtime\").JSX.Element;\n",
         "affectsGlobalScope": false
       }
     },
@@ -245,10 +249,14 @@ exports.App = App;
       "watch": true,
       "configFilePath": "./tsconfig.json"
     },
-    "referencedMap": {},
+    "referencedMap": {
+      "./index.tsx": [
+        "./node_modules/preact/jsx-runtime/index.d.ts"
+      ]
+    },
     "exportedModulesMap": {
       "./index.tsx": [
-        "./node_modules/react/jsx-runtime/index.d.ts"
+        "./node_modules/preact/jsx-runtime/index.d.ts"
       ]
     },
     "semanticDiagnosticsPerFile": [
