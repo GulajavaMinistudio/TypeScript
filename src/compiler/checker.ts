@@ -646,6 +646,10 @@ namespace ts {
                 return resolveName(location, escapeLeadingUnderscores(name), meaning, /*nameNotFoundMessage*/ undefined, /*nameArg*/ undefined, /*isUse*/ false, excludeGlobals);
             },
             getJsxNamespace: n => unescapeLeadingUnderscores(getJsxNamespace(n)),
+            getJsxFragmentFactory: n => {
+                const jsxFragmentFactory = getJsxFragmentFactoryEntity(n);
+                return jsxFragmentFactory && unescapeLeadingUnderscores(getFirstIdentifier(jsxFragmentFactory).escapedText);
+            },
             getAccessibleSymbolChain,
             getTypePredicateOfSignature,
             resolveExternalModuleName: moduleSpecifierIn => {
@@ -36981,6 +36985,7 @@ namespace ts {
         }
 
         function checkDeferredNode(node: Node) {
+            tracing.push(tracing.Phase.Check, "checkDeferredNode", { kind: node.kind, pos: node.pos, end: node.end });
             const saveCurrentNode = currentNode;
             currentNode = node;
             instantiationCount = 0;
@@ -37016,6 +37021,7 @@ namespace ts {
                     break;
             }
             currentNode = saveCurrentNode;
+            tracing.pop();
         }
 
         function checkSourceFile(node: SourceFile) {
