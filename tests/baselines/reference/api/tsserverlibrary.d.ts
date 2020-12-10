@@ -2977,10 +2977,6 @@ declare namespace ts {
         None = 0,
         Recursive = 1
     }
-    export interface ExpandResult {
-        fileNames: string[];
-        wildcardDirectories: MapLike<WatchDirectoryFlags>;
-    }
     export interface CreateProgramOptions {
         rootNames: readonly string[];
         options: CompilerOptions;
@@ -9910,7 +9906,7 @@ declare namespace ts.server {
         allowLocalPluginLoads?: boolean;
         typesMapLocation?: string;
     }
-    class Session implements EventSender {
+    class Session<TMessage = string> implements EventSender {
         private readonly gcTimer;
         protected projectService: ProjectService;
         private changeSeq;
@@ -10068,7 +10064,9 @@ declare namespace ts.server {
         private resetCurrentRequest;
         executeWithRequestId<T>(requestId: number, f: () => T): T;
         executeCommand(request: protocol.Request): HandlerResponse;
-        onMessage(message: string): void;
+        onMessage(message: TMessage): void;
+        protected parseMessage(message: TMessage): protocol.Request;
+        protected toStringMessage(message: TMessage): string;
         private getFormatOptions;
         private getPreferences;
         private getHostFormatOptions;
