@@ -2653,6 +2653,8 @@ declare namespace ts {
     export interface TemplateLiteralType extends InstantiableType {
         texts: readonly string[];
         types: readonly Type[];
+        freshType: TemplateLiteralType;
+        regularType: TemplateLiteralType;
     }
     export interface StringMappingType extends InstantiableType {
         symbol: Symbol;
@@ -5531,6 +5533,7 @@ declare namespace ts {
         getReferencesAtPosition(fileName: string, position: number): ReferenceEntry[] | undefined;
         findReferences(fileName: string, position: number): ReferencedSymbol[] | undefined;
         getDocumentHighlights(fileName: string, position: number, filesToSearch: string[]): DocumentHighlights[] | undefined;
+        getFileReferences(fileName: string): ReferenceEntry[];
         /** @deprecated */
         getOccurrencesAtPosition(fileName: string, position: number): readonly ReferenceEntry[] | undefined;
         getNavigateToItems(searchValue: string, maxResultCount?: number, fileName?: string, excludeDtsFiles?: boolean): NavigateToItem[];
