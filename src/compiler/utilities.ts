@@ -2622,18 +2622,31 @@ namespace ts {
 
     export function getEffectiveJSDocHost(node: Node): Node | undefined {
         const host = getJSDocHost(node);
-        const decl = getSourceOfDefaultedAssignment(host) ||
-            getSourceOfAssignment(host) ||
-            getSingleInitializerOfVariableStatementOrPropertyDeclaration(host) ||
-            getSingleVariableOfVariableStatement(host) ||
-            getNestedModuleDeclaration(host) ||
-            host;
-        return decl;
+        if (host) {
+            return getSourceOfDefaultedAssignment(host)
+                || getSourceOfAssignment(host)
+                || getSingleInitializerOfVariableStatementOrPropertyDeclaration(host)
+                || getSingleVariableOfVariableStatement(host)
+                || getNestedModuleDeclaration(host)
+                || host;
+        }
     }
 
-    /** Use getEffectiveJSDocHost if you additionally need to look for jsdoc on parent nodes, like assignments.  */
-    export function getJSDocHost(node: Node): HasJSDoc {
-        return Debug.checkDefined(findAncestor(node.parent, isJSDoc)).parent;
+    /** Use getEffectiveJSDocHost if you additionally need to look for jsdoc on parent nodes, like assignments. */
+    export function getJSDocHost(node: Node): HasJSDoc | undefined {
+        const jsDoc = getJSDocRoot(node);
+        if (!jsDoc) {
+            return undefined;
+        }
+
+        const host = jsDoc.parent;
+        if (host && host.jsDoc && jsDoc === lastOrUndefined(host.jsDoc)) {
+            return host;
+        }
+    }
+
+    export function getJSDocRoot(node: Node): JSDoc | undefined {
+        return findAncestor(node.parent, isJSDoc);
     }
 
     export function getTypeParameterFromJsDoc(node: TypeParameterDeclaration & { parent: JSDocTemplateTag }): TypeParameterDeclaration | undefined {
@@ -7014,6 +7027,44 @@ namespace ts {
 
         function bindParentToChild(child: Node, parent: Node) {
             return bindParentToChildIgnoringJSDoc(child, parent) || bindJSDoc(child);
+        }
+    }
+
+    /**
+     * Indicates whether the result of an `Expression` will be unused.
+     *
+     * NOTE: This requires a node with a valid `parent` pointer.
+     */
+    export function expressionResultIsUnused(node: Expression): boolean {
+        Debug.assertIsDefined(node.parent);
+        while (true) {
+            const parent: Node = node.parent;
+            // walk up parenthesized expressions, but keep a pointer to the top-most parenthesized expression
+            if (isParenthesizedExpression(parent)) {
+                node = parent;
+                continue;
+            }
+            // result is unused in an expression statement, `void` expression, or the initializer or incrementer of a `for` loop
+            if (isExpressionStatement(parent) ||
+                isVoidExpression(parent) ||
+                isForStatement(parent) && (parent.initializer === node || parent.incrementor === node)) {
+                return true;
+            }
+            if (isCommaListExpression(parent)) {
+                // left side of comma is always unused
+                if (node !== last(parent.elements)) return true;
+                // right side of comma is unused if parent is unused
+                node = parent;
+                continue;
+            }
+            if (isBinaryExpression(parent) && parent.operatorToken.kind === SyntaxKind.CommaToken) {
+                // left side of comma is always unused
+                if (node === parent.left) return true;
+                // right side of comma is unused if parent is unused
+                node = parent;
+                continue;
+            }
+            return false;
         }
     }
 }

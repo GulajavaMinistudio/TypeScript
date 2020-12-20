@@ -1948,7 +1948,10 @@ namespace ts {
                     case SyntaxKind.JSDocCallbackTag:
                     case SyntaxKind.JSDocEnumTag:
                         // js type aliases do not resolve names from their host, so skip past it
-                        location = getJSDocHost(location);
+                        const root = getJSDocRoot(location);
+                        if (root) {
+                            location = root.parent;
+                        }
                         break;
                     case SyntaxKind.Parameter:
                         if (lastLocation && (
@@ -3160,7 +3163,8 @@ namespace ts {
                 return;
             }
             const host = getJSDocHost(node);
-            if (isExpressionStatement(host) &&
+            if (host &&
+                isExpressionStatement(host) &&
                 isBinaryExpression(host.expression) &&
                 getAssignmentDeclarationKind(host.expression) === AssignmentDeclarationKind.PrototypeProperty) {
                 // X.prototype.m = /** @param {K} p */ function () { } <-- look for K on X's declaration
@@ -3169,7 +3173,7 @@ namespace ts {
                     return getDeclarationOfJSPrototypeContainer(symbol);
                 }
             }
-            if ((isObjectLiteralMethod(host) || isPropertyAssignment(host)) &&
+            if (host && (isObjectLiteralMethod(host) || isPropertyAssignment(host)) &&
                 isBinaryExpression(host.parent.parent) &&
                 getAssignmentDeclarationKind(host.parent.parent) === AssignmentDeclarationKind.Prototype) {
                 // X.prototype = { /** @param {K} p */m() { } } <-- look for K on X's declaration
@@ -4996,7 +5000,7 @@ namespace ts {
                     anyType : getTypeOfSymbol(propertySymbol);
                 const saveEnclosingDeclaration = context.enclosingDeclaration;
                 context.enclosingDeclaration = undefined;
-                if (context.tracker.trackSymbol && getCheckFlags(propertySymbol) & CheckFlags.Late) {
+                if (context.tracker.trackSymbol && getCheckFlags(propertySymbol) & CheckFlags.Late && isLateBoundName(propertySymbol.escapedName)) {
                     const decl = first(propertySymbol.declarations);
                     if (hasLateBindableName(decl)) {
                         if (isBinaryExpression(decl)) {
@@ -20041,7 +20045,7 @@ namespace ts {
             // Two object types that each have a property that is unmatched in the other are definitely unrelated.
             return isTupleType(source) && isTupleType(target) ? tupleTypesDefinitelyUnrelated(source, target) :
                 !!getUnmatchedProperty(source, target, /*requireOptionalProperties*/ false, /*matchDiscriminantProperties*/ true) &&
-                !!getUnmatchedProperty(target, source, /*requireOptionalProperties*/ false, /*matchDiscriminantProperties*/ true);
+                !!getUnmatchedProperty(target, source, /*requireOptionalProperties*/ false, /*matchDiscriminantProperties*/ false);
         }
 
         function getTypeFromInference(inference: InferenceInfo) {
@@ -30866,8 +30870,17 @@ namespace ts {
                 return getIterationTypeOfGeneratorFunctionReturnType(IterationTypeKind.Next, returnType, isAsync)
                     || anyType;
             }
-
-            return getContextualIterationType(IterationTypeKind.Next, func) || anyType;
+            let type = getContextualIterationType(IterationTypeKind.Next, func);
+            if (!type) {
+                type = anyType;
+                if (produceDiagnostics && noImplicitAny && !expressionResultIsUnused(node)) {
+                    const contextualType = getContextualType(node);
+                    if (!contextualType || isTypeAny(contextualType)) {
+                        error(node, Diagnostics.yield_expression_implicitly_results_in_an_any_type_because_its_containing_generator_lacks_a_return_type_annotation);
+                    }
+                }
+            }
+            return type;
         }
 
         function checkConditionalExpression(node: ConditionalExpression, checkMode?: CheckMode): Type {

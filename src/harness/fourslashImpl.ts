@@ -1117,7 +1117,9 @@ namespace FourSlash {
         }
 
         public verifyBaselineFindAllReferences(...markerNames: string[]) {
+            ts.Debug.assert(markerNames.length > 0, "Must pass at least one marker name to `baselineFindAllReferences()`");
             const baseline = markerNames.map(markerName => {
+                this.goToMarker(markerName);
                 const marker = this.getMarkerByName(markerName);
                 const references = this.languageService.findReferences(marker.fileName, marker.position);
                 const refsByFile = references
@@ -1200,7 +1202,7 @@ namespace FourSlash {
             }
         }
 
-        // Necessary to have this function since `findReferences` isn't implemented in `client.ts`
+        /** @deprecated - use `verify.baselineFindAllReferences()` instead. */
         public verifyGetReferencesForServerTest(expected: readonly ts.ReferenceEntry[]): void {
             const refs = this.getReferencesAtCaret();
             assert.deepEqual<readonly ts.ReferenceEntry[] | undefined>(refs, expected);
@@ -2796,7 +2798,12 @@ namespace FourSlash {
 
             const details = this.getCompletionEntryDetails(options.name, options.source, options.preferences);
             if (!details) {
-                return this.raiseError(`No completions were found for the given name, source, and preferences.`);
+                const completions = this.getCompletionListAtCaret(options.preferences)?.entries;
+                const matchingName = completions?.filter(e => e.name === options.name);
+                const detailMessage = matchingName?.length
+                    ? `\n  Found ${matchingName.length} with name '${options.name}' from source(s) ${matchingName.map(e => `'${e.source}'`).join(", ")}.`
+                    : "";
+                return this.raiseError(`No completions were found for the given name, source, and preferences.` + detailMessage);
             }
             const codeActions = details.codeActions;
             if (codeActions?.length !== 1) {
