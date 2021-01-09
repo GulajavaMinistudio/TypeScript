@@ -5008,7 +5008,7 @@ namespace ts {
         // This *should* be every type other than null, undefined, void, and never
         Narrowable = Any | Unknown | StructuredOrInstantiable | StringLike | NumberLike | BigIntLike | BooleanLike | ESSymbol | UniqueESSymbol | NonPrimitive,
         /* @internal */
-        NotPrimitiveUnion = Any | Unknown | Enum | Void | Never | StructuredOrInstantiable,
+        NotPrimitiveUnion = Any | Unknown | Enum | Void | Never | Object | Intersection | Instantiable,
         // The following flags are aggregated during union and intersection type construction
         /* @internal */
         IncludesMask = Any | Unknown | Primitive | Never | Object | Union | Intersection | NonPrimitive | TemplateLiteral,
@@ -5296,9 +5296,11 @@ namespace ts {
 
     export interface UnionType extends UnionOrIntersectionType {
         /* @internal */
-        resolvedReducedType: Type;
+        resolvedReducedType?: Type;
         /* @internal */
-        regularType: UnionType;
+        regularType?: UnionType;
+        /* @internal */
+        origin?: Type;  // Denormalized union, intersection, or index type in which union originates
     }
 
     export interface IntersectionType extends UnionOrIntersectionType {
@@ -5826,7 +5828,6 @@ namespace ts {
         /** An error if set - this should only go through the -b pipeline and not actually be observed */
         /*@internal*/
         build?: boolean;
-        bundledPackageName?: string;
         charset?: string;
         checkJs?: boolean;
         /* @internal */ configFilePath?: string;
@@ -7954,7 +7955,7 @@ namespace ts {
         readonly redirectTargetsMap: RedirectTargetsMap;
         getProjectReferenceRedirect(fileName: string): string | undefined;
         isSourceOfProjectReferenceRedirect(fileName: string): boolean;
-        getCompilerOptions(): CompilerOptions;
+        getFileIncludeReasons(): MultiMap<Path, FileIncludeReason>;
     }
 
     // Note: this used to be deprecated in our public API, but is still used internally
