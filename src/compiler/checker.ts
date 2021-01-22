@@ -11209,11 +11209,21 @@ namespace ts {
                 if (t.flags & TypeFlags.UnionOrIntersection) {
                     const types = (<UnionOrIntersectionType>t).types;
                     const baseTypes: Type[] = [];
+                    let different = false;
                     for (const type of types) {
                         const baseType = getBaseConstraint(type);
                         if (baseType) {
+                            if (baseType !== type) {
+                                different = true;
+                            }
                             baseTypes.push(baseType);
                         }
+                        else {
+                            different = true;
+                        }
+                    }
+                    if (!different) {
+                        return t;
                     }
                     return t.flags & TypeFlags.Union && baseTypes.length === types.length ? getUnionType(baseTypes) :
                         t.flags & TypeFlags.Intersection && baseTypes.length ? getIntersectionType(baseTypes) :
@@ -14099,7 +14109,8 @@ namespace ts {
                 return some((type as IntersectionType).types, isJSLiteralType);
             }
             if (type.flags & TypeFlags.Instantiable) {
-                return isJSLiteralType(getResolvedBaseConstraint(type));
+                const constraint = getResolvedBaseConstraint(type);
+                return constraint !== type && isJSLiteralType(constraint);
             }
             return false;
         }
