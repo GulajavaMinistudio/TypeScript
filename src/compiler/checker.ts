@@ -34546,8 +34546,9 @@ namespace ts {
                 : isPropertyAccessExpression(location) ? location.name
                 : isBinaryExpression(location) && isIdentifier(location.right) ? location.right
                 : undefined;
-
-            if (!testedNode) {
+            const isPropertyExpressionCast = isPropertyAccessExpression(location)
+                && isAssertionExpression(skipParentheses(location.expression));
+            if (!testedNode || isPropertyExpressionCast) {
                 return;
             }
 
