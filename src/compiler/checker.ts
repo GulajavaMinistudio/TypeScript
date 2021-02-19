@@ -2495,7 +2495,7 @@ namespace ts {
                     && isAliasableOrJsExpression(node.parent.right)
                 || node.kind === SyntaxKind.ShorthandPropertyAssignment
                 || node.kind === SyntaxKind.PropertyAssignment && isAliasableOrJsExpression((node as PropertyAssignment).initializer)
-                || isRequireVariableDeclaration(node, /*requireStringLiteralLikeArgument*/ true);
+                || isRequireVariableDeclaration(node);
         }
 
         function isAliasableOrJsExpression(e: Expression) {
@@ -21978,7 +21978,16 @@ namespace ts {
                         const type = getTypeOfDottedName((<PropertyAccessExpression>node).expression, diagnostic);
                         if (type) {
                             const name = (<PropertyAccessExpression>node).name;
-                            const prop = getPropertyOfType(type, isPrivateIdentifier(name) ? getSymbolNameForPrivateIdentifier(type.symbol, name.escapedText) : name.escapedText);
+                            let prop: Symbol | undefined;
+                            if (isPrivateIdentifier(name)) {
+                                if (!type.symbol) {
+                                    return undefined;
+                                }
+                                prop = getPropertyOfType(type, getSymbolNameForPrivateIdentifier(type.symbol, name.escapedText));
+                            }
+                            else {
+                                prop = getPropertyOfType(type, name.escapedText);
+                            }
                             return prop && getExplicitTypeOfSymbol(prop, diagnostic);
                         }
                         return undefined;
@@ -34403,7 +34412,7 @@ namespace ts {
             }
             // For a commonjs `const x = require`, validate the alias and exit
             const symbol = getSymbolOfNode(node);
-            if (symbol.flags & SymbolFlags.Alias && isRequireVariableDeclaration(node, /*requireStringLiteralLikeArgument*/ true)) {
+            if (symbol.flags & SymbolFlags.Alias && isRequireVariableDeclaration(node)) {
                 checkAliasSymbol(node);
                 return;
             }
@@ -40773,7 +40782,7 @@ namespace ts {
                 if (isStringLiteral(node.name) && node.name.text === "constructor") {
                     return grammarErrorOnNode(node.name, Diagnostics.Classes_may_not_have_a_field_named_constructor);
                 }
-                if (checkGrammarForInvalidDynamicName(node.name, Diagnostics.A_computed_property_name_in_a_class_property_declaration_must_refer_to_an_expression_whose_type_is_a_literal_type_or_a_unique_symbol_type)) {
+                if (checkGrammarForInvalidDynamicName(node.name, Diagnostics.A_computed_property_name_in_a_class_property_declaration_must_have_a_simple_literal_type_or_a_unique_symbol_type)) {
                     return true;
                 }
                 if (languageVersion < ScriptTarget.ES2015 && isPrivateIdentifier(node.name)) {
