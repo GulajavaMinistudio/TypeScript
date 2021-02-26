@@ -13460,7 +13460,7 @@ namespace ts {
                 if (t.flags & TypeFlags.Union) {
                     const origin = (<UnionType>t).origin;
                     if (t.aliasSymbol || origin && !(origin.flags & TypeFlags.Union)) {
-                        namedUnions.push(t);
+                        pushIfUnique(namedUnions, t);
                     }
                     else if (origin && origin.flags & TypeFlags.Union) {
                         addNamedUnions(namedUnions, (<UnionType>origin).types);
@@ -18948,7 +18948,7 @@ namespace ts {
                     return indexTypesIdenticalTo(source, target, kind);
                 }
                 const targetType = getIndexTypeOfType(target, kind);
-                if (!targetType || targetType.flags & TypeFlags.Any && !sourceIsPrimitive) {
+                if (!targetType || targetType.flags & TypeFlags.Any && !sourceIsPrimitive && kind === IndexKind.String) {
                     // Index signature of type any permits assignment from everything but primitives
                     return Ternary.True;
                 }
@@ -26059,11 +26059,11 @@ namespace ts {
             if (!links.resolvedJsxElementAttributesType) {
                 const symbol = getIntrinsicTagSymbol(node);
                 if (links.jsxFlags & JsxFlags.IntrinsicNamedElement) {
-                    return links.resolvedJsxElementAttributesType = getTypeOfSymbol(symbol);
+                    return links.resolvedJsxElementAttributesType = getTypeOfSymbol(symbol) || errorType;
                 }
                 else if (links.jsxFlags & JsxFlags.IntrinsicIndexedElement) {
                     return links.resolvedJsxElementAttributesType =
-                        getIndexTypeOfType(getDeclaredTypeOfSymbol(symbol), IndexKind.String)!;
+                        getIndexTypeOfType(getJsxType(JsxNames.IntrinsicElements, node), IndexKind.String) || errorType;
                 }
                 else {
                     return links.resolvedJsxElementAttributesType = errorType;
@@ -37124,7 +37124,7 @@ namespace ts {
                     error(node, Diagnostics.Re_exporting_a_type_when_the_isolatedModules_flag_is_provided_requires_using_export_type);
                 }
 
-                if (isImportSpecifier(node) && every(target.declarations, d => !!(getCombinedNodeFlags(d) & NodeFlags.Deprecated))) {
+                if (isImportSpecifier(node) && target.declarations?.every(d => !!(getCombinedNodeFlags(d) & NodeFlags.Deprecated))) {
                     addDeprecatedSuggestion(node.name, target.declarations, symbol.escapedName as string);
                 }
             }
