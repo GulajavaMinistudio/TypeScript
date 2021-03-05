@@ -8847,9 +8847,11 @@ namespace ts {
             Debug.assertIsDefined(symbol.valueDeclaration);
             const declaration = symbol.valueDeclaration;
             if (isCatchClauseVariableDeclarationOrBindingElement(declaration)) {
-                const decl = declaration as VariableDeclaration;
-                if (!decl.type) return anyType;
-                const type = getTypeOfNode(decl.type);
+                const typeNode = getEffectiveTypeAnnotationNode(declaration);
+                if (typeNode === undefined) {
+                    return anyType;
+                }
+                const type = getTypeOfNode(typeNode);
                 // an errorType will make `checkTryStatement` issue an error
                 return isTypeAny(type) || type === unknownType ? type : errorType;
             }
@@ -14794,7 +14796,10 @@ namespace ts {
                         // types rules (i.e. proper contravariance) for inferences.
                         inferTypes(context.inferences, checkType, extendsType, InferencePriority.NoConstraints | InferencePriority.AlwaysStrict);
                     }
-                    combinedMapper = mergeTypeMappers(mapper, context.mapper);
+                    // It's possible for 'infer T' type paramteters to be given uninstantiated constraints when the
+                    // those type parameters are used in type references (see getInferredTypeParameterConstraint). For
+                    // that reason we need context.mapper to be first in the combined mapper. See #42636 for examples.
+                    combinedMapper = mapper ? combineTypeMappers(context.mapper, mapper) : context.mapper;
                 }
                 // Instantiate the extends type including inferences for 'infer T' type parameters
                 const inferredExtendsType = combinedMapper ? instantiateType(unwrapNondistributiveConditionalTuple(root, root.extendsType), combinedMapper) : extendsType;
@@ -17224,6 +17229,7 @@ namespace ts {
                         );
                     }
                     else {
+                        errorInfo = undefined;
                         reportError(
                             Diagnostics._0_could_be_instantiated_with_an_arbitrary_type_which_could_be_unrelated_to_1,
                             targetType,
@@ -19027,9 +19033,17 @@ namespace ts {
                     return indexTypesIdenticalTo(source, target, kind);
                 }
                 const targetType = getIndexTypeOfType(target, kind);
-                if (!targetType || targetType.flags & TypeFlags.Any && !sourceIsPrimitive && kind === IndexKind.String) {
-                    // Index signature of type any permits assignment from everything but primitives
+                if (!targetType) {
                     return Ternary.True;
+                }
+                if (targetType.flags & TypeFlags.Any && !sourceIsPrimitive) {
+                    // An index signature of type `any` permits assignment from everything but primitives,
+                    // provided that there is also a `string` index signature of type `any`.
+                    const stringIndexType = kind === IndexKind.String ? targetType : getIndexTypeOfType(target, IndexKind.String);
+                    if (stringIndexType && stringIndexType.flags & TypeFlags.Any) {
+                        return Ternary.True;
+                    }
+
                 }
                 if (isGenericMappedType(source)) {
                     // A generic mapped type { [P in K]: T } is related to a type with an index signature
@@ -36044,10 +36058,11 @@ namespace ts {
                 // Grammar checking
                 if (catchClause.variableDeclaration) {
                     const declaration = catchClause.variableDeclaration;
-                    if (declaration.type) {
+                    const typeNode = getEffectiveTypeAnnotationNode(getRootDeclaration(declaration));
+                    if (typeNode) {
                         const type = getTypeForVariableLikeDeclaration(declaration, /*includeOptionality*/ false);
                         if (type && !(type.flags & TypeFlags.AnyOrUnknown)) {
-                            grammarErrorOnFirstToken(declaration.type, Diagnostics.Catch_clause_variable_type_annotation_must_be_any_or_unknown_if_specified);
+                            grammarErrorOnFirstToken(typeNode, Diagnostics.Catch_clause_variable_type_annotation_must_be_any_or_unknown_if_specified);
                         }
                     }
                     else if (declaration.initializer) {
