@@ -186,7 +186,7 @@ interface Symbol {
         }
     }
 
-    export function generateSourceMapBaselineFiles(sys: System & { writtenFiles: ReadonlyCollection<string>; }) {
+    export function generateSourceMapBaselineFiles(sys: System & { writtenFiles: ReadonlyCollection<Path>; }) {
         const mapFileNames = mapDefinedIterator(sys.writtenFiles.keys(), f => f.endsWith(".map") ? f : undefined);
         while (true) {
             const result = mapFileNames.next();
@@ -238,7 +238,7 @@ interface Symbol {
 
     function generateBuildInfoProgramBaseline(sys: System, originalWriteFile: System["writeFile"], buildInfoPath: string, buildInfo: BuildInfo) {
         type ProgramBuildInfoDiagnostic = string | [string, readonly ReusableDiagnostic[]];
-        type ProgramBuilderInfoFilePendingEmit = [string, BuilderFileEmit];
+        type ProgramBuilderInfoFilePendingEmit = [string, "DtsOnly" | "Full"];
         interface ProgramBuildInfo {
             fileNames: readonly string[];
             fileNamesList: readonly (readonly string[])[] | undefined;
@@ -266,7 +266,9 @@ interface Symbol {
             ),
             affectedFilesPendingEmit: buildInfo.program.affectedFilesPendingEmit?.map(([fileId, emitKind]) => [
                 toFileName(fileId),
-                emitKind
+                emitKind === BuilderFileEmit.DtsOnly ? "DtsOnly" :
+                    emitKind === BuilderFileEmit.Full ? "Full" :
+                        Debug.assertNever(emitKind)
             ]),
         };
         const version = buildInfo.version === ts.version ? fakes.version : buildInfo.version;
@@ -297,14 +299,18 @@ interface Symbol {
         }
     }
 
+    export function toPathWithSystem(sys: System, fileName: string): Path {
+        return toPath(fileName, sys.getCurrentDirectory(), createGetCanonicalFileName(sys.useCaseSensitiveFileNames));
+    }
+
     export function baselineBuildInfo(
         options: CompilerOptions,
-        sys: System & { writtenFiles: ReadonlyCollection<string>; },
+        sys: System & { writtenFiles: ReadonlyCollection<Path>; },
         originalReadCall?: System["readFile"],
         originalWriteFile?: System["writeFile"],
     ) {
         const buildInfoPath = getTsBuildInfoEmitOutputFilePath(options);
-        if (!buildInfoPath || !sys.writtenFiles.has(buildInfoPath)) return;
+        if (!buildInfoPath || !sys.writtenFiles.has(toPathWithSystem(sys, buildInfoPath))) return;
         if (!sys.fileExists(buildInfoPath)) return;
 
         const buildInfo = getBuildInfo((originalReadCall || sys.readFile).call(sys, buildInfoPath, "utf8")!);
