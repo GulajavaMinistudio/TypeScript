@@ -1302,6 +1302,26 @@ namespace ts {
     export interface PrivateIdentifierPropertyDeclaration extends PropertyDeclaration {
         name: PrivateIdentifier;
     }
+    /*@internal*/
+    export interface PrivateIdentifierMethodDeclaration extends MethodDeclaration {
+        name: PrivateIdentifier;
+    }
+    /*@internal*/
+    export interface PrivateIdentifierGetAccessorDeclaration extends GetAccessorDeclaration {
+        name: PrivateIdentifier;
+    }
+    /*@internal*/
+    export interface PrivateIdentifierSetAccessorDeclaration extends SetAccessorDeclaration {
+        name: PrivateIdentifier;
+    }
+    /*@internal*/
+    export type PrivateIdentifierAccessorDeclaration = PrivateIdentifierGetAccessorDeclaration | PrivateIdentifierSetAccessorDeclaration;
+    /*@internal*/
+    export type PrivateClassElementDeclaration =
+        | PrivateIdentifierPropertyDeclaration
+        | PrivateIdentifierMethodDeclaration
+        | PrivateIdentifierGetAccessorDeclaration
+        | PrivateIdentifierSetAccessorDeclaration;
 
     /* @internal */
     export type InitializedPropertyDeclaration = PropertyDeclaration & { readonly initializer: Expression };
@@ -6436,6 +6456,9 @@ namespace ts {
         // TODO: later handle this in better way in builder host instead once the api for tsbuild finalizes and doesn't use compilerHost as base
         /*@internal*/createDirectory?(directory: string): void;
         /*@internal*/getSymlinkCache?(): SymlinkCache;
+
+        // For testing:
+        /*@internal*/ disableUseFileVersionAsSignature?: boolean;
     }
 
     /** true if --out otherwise source file name */
