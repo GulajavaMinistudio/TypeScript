@@ -18274,6 +18274,11 @@ namespace ts {
                     }
                 }
                 else if (target.flags & TypeFlags.TemplateLiteral) {
+                    if (source.flags & TypeFlags.TemplateLiteral) {
+                        // Report unreliable variance for type variables referenced in template literal type placeholders.
+                        // For example, `foo-${number}` is related to `foo-${string}` even though number isn't related to string.
+                        instantiateType(source, makeFunctionTypeMapper(reportUnreliableMarkers));
+                    }
                     const result = inferTypesFromTemplateLiteralType(source, target as TemplateLiteralType);
                     if (result && every(result, (r, i) => isValidTypeForTemplateLiteralPlaceholder(r, (target as TemplateLiteralType).types[i]))) {
                         return Ternary.True;
@@ -18314,20 +18319,6 @@ namespace ts {
                 }
                 else if (source.flags & TypeFlags.Index) {
                     if (result = isRelatedTo(keyofConstraintType, target, reportErrors)) {
-                        resetErrorInfo(saveErrorInfo);
-                        return result;
-                    }
-                }
-                else if (source.flags & TypeFlags.TemplateLiteral) {
-                    if (target.flags & TypeFlags.TemplateLiteral &&
-                        (source as TemplateLiteralType).texts.length === (target as TemplateLiteralType).texts.length &&
-                        (source as TemplateLiteralType).types.length === (target as TemplateLiteralType).types.length &&
-                        every((source as TemplateLiteralType).texts, (t, i) => t === (target as TemplateLiteralType).texts[i]) &&
-                        every((instantiateType(source, makeFunctionTypeMapper(reportUnreliableMarkers)) as TemplateLiteralType).types, (t, i) => !!((target as TemplateLiteralType).types[i].flags & (TypeFlags.Any | TypeFlags.String)) || !!isRelatedTo(t, (target as TemplateLiteralType).types[i], /*reportErrors*/ false))) {
-                        return Ternary.True;
-                    }
-                    const constraint = getBaseConstraintOfType(source);
-                    if (constraint && constraint !== source && (result = isRelatedTo(constraint, target, reportErrors))) {
                         resetErrorInfo(saveErrorInfo);
                         return result;
                     }
@@ -19789,7 +19780,13 @@ namespace ts {
         function isArrayLikeType(type: Type): boolean {
             // A type is array-like if it is a reference to the global Array or global ReadonlyArray type,
             // or if it is not the undefined or null type and if it is assignable to ReadonlyArray<any>
-            return isArrayType(type) || !(type.flags & TypeFlags.Nullable) && isTypeAssignableTo(type, anyReadonlyArrayType);
+            return isArrayType(type) || hasArrayOrReadonlyArrayBaseType(type) || !(type.flags & TypeFlags.Nullable) && isTypeAssignableTo(type, anyReadonlyArrayType);
+        }
+
+        function hasArrayOrReadonlyArrayBaseType(type: Type): boolean {
+            return !!(getObjectFlags(type) & ObjectFlags.Reference)
+                && !!(getObjectFlags((type as TypeReference).target) & ObjectFlags.ClassOrInterface)
+                && some(getBaseTypes((type as TypeReference).target as InterfaceType), isArrayType);
         }
 
         function isEmptyArrayLiteralType(type: Type): boolean {
@@ -27119,7 +27116,7 @@ namespace ts {
             if (isInPropertyInitializer(node)
                 && !(isAccessExpression(node) && isAccessExpression(node.expression))
                 && !isBlockScopedNameDeclaredBeforeUse(valueDeclaration, right)
-                && !isPropertyDeclaredInAncestorClass(prop)) {
+                && (compilerOptions.useDefineForClassFields || !isPropertyDeclaredInAncestorClass(prop))) {
                 diagnosticMessage = error(right, Diagnostics.Property_0_is_used_before_its_initialization, declarationName);
             }
             else if (valueDeclaration.kind === SyntaxKind.ClassDeclaration &&
@@ -36566,6 +36563,7 @@ namespace ts {
             switch (name.escapedText) {
                 case "any":
                 case "unknown":
+                case "never":
                 case "number":
                 case "bigint":
                 case "boolean":
