@@ -551,6 +551,7 @@ namespace ts {
             case SyntaxKind.JSDocPrivateTag:
             case SyntaxKind.JSDocProtectedTag:
             case SyntaxKind.JSDocReadonlyTag:
+            case SyntaxKind.JSDocDeprecatedTag:
                 return visitNode(cbNode, (node as JSDocTag).tagName)
                  || (typeof (node as JSDoc).comment === "string" ? undefined : visitNodes(cbNode, cbNodes, (node as JSDoc).comment as NodeArray<JSDocText | JSDocLink> | undefined));
             case SyntaxKind.PartiallyEmittedExpression:
@@ -2109,8 +2110,7 @@ namespace ts {
 
             while (!isListTerminator(kind)) {
                 if (isListElement(kind, /*inErrorRecovery*/ false)) {
-                    const element = parseListElement(kind, parseElement);
-                    list.push(element);
+                    list.push(parseListElement(kind, parseElement));
 
                     continue;
                 }
@@ -5602,7 +5602,13 @@ namespace ts {
                 const multiLine = scanner.hasPrecedingLineBreak();
                 const statements = parseList(ParsingContext.BlockStatements, parseStatement);
                 parseExpectedMatchingBrackets(SyntaxKind.OpenBraceToken, SyntaxKind.CloseBraceToken, openBracePosition);
-                return finishNode(factory.createBlock(statements, multiLine), pos);
+                const result = finishNode(factory.createBlock(statements, multiLine), pos);
+                if (token() === SyntaxKind.EqualsToken) {
+                    parseErrorAtCurrentToken(Diagnostics.Declaration_or_statement_expected_This_follows_a_block_of_statements_so_if_you_intended_to_write_a_destructuring_assignment_you_might_need_to_wrap_the_the_whole_assignment_in_parentheses);
+                    nextToken();
+                }
+
+                return result;
             }
             else {
                 const statements = createMissingList<Statement>();
