@@ -547,6 +547,7 @@ namespace ts {
                 return node && getContextualTypeForJsxAttribute(node);
             },
             isContextSensitive,
+            getTypeOfPropertyOfContextualType,
             getFullyQualifiedName,
             getResolvedSignature: (node, candidatesOutArray, argumentCount) =>
                 getResolvedSignatureWorker(node, candidatesOutArray, argumentCount, CheckMode.Normal),
@@ -12611,6 +12612,19 @@ namespace ts {
                         // constraint.
                         else if (grandParent.kind === SyntaxKind.TypeParameter && grandParent.parent.kind === SyntaxKind.MappedType) {
                             inferences = append(inferences, keyofConstraintType);
+                        }
+                        // When an 'infer T' declaration is the template of a mapped type, and that mapped type is the extends
+                        // clause of a conditional whose check type is also a mapped type, give it a constraint equal to the template
+                        // of the check type's mapped type
+                        else if (grandParent.kind === SyntaxKind.MappedType && (grandParent as MappedTypeNode).type &&
+                            skipParentheses((grandParent as MappedTypeNode).type!) === declaration.parent && grandParent.parent.kind === SyntaxKind.ConditionalType &&
+                            (grandParent.parent as ConditionalTypeNode).extendsType === grandParent && (grandParent.parent as ConditionalTypeNode).checkType.kind === SyntaxKind.MappedType &&
+                            ((grandParent.parent as ConditionalTypeNode).checkType as MappedTypeNode).type) {
+                            const checkMappedType = (grandParent.parent as ConditionalTypeNode).checkType as MappedTypeNode;
+                            const nodeType = getTypeFromTypeNode(checkMappedType.type!);
+                            inferences = append(inferences, instantiateType(nodeType,
+                                makeUnaryTypeMapper(getDeclaredTypeOfTypeParameter(getSymbolOfNode(checkMappedType.typeParameter)), checkMappedType.typeParameter.constraint ? getTypeFromTypeNode(checkMappedType.typeParameter.constraint) : keyofConstraintType)
+                            ));
                         }
                     }
                 }
