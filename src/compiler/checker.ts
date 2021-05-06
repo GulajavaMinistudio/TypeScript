@@ -15022,7 +15022,7 @@ namespace ts {
             // purposes of resolution. This means such types aren't subject to the instatiation depth limiter.
             while (true) {
                 const isUnwrapped = isTypicalNondistributiveConditional(root);
-                const checkType = instantiateType(unwrapNondistributiveConditionalTuple(root, root.checkType), mapper);
+                const checkType = instantiateType(unwrapNondistributiveConditionalTuple(root, getActualTypeVariable(root.checkType)), mapper);
                 const checkTypeInstantiable = isGenericObjectType(checkType) || isGenericIndexType(checkType);
                 const extendsType = instantiateType(unwrapNondistributiveConditionalTuple(root, root.extendsType), mapper);
                 if (checkType === wildcardType || extendsType === wildcardType) {
@@ -19954,6 +19954,9 @@ namespace ts {
         // of those literal types. Otherwise, return the leftmost type for which no type to the
         // right is a supertype.
         function getSupertypeOrUnion(types: Type[]): Type {
+            if (types.length === 1) {
+                return types[0];
+            }
             return literalTypesWithSameBaseType(types) ?
                 getUnionType(types) :
                 reduceLeft(types, (s, t) => isTypeSubtypeOf(s, t) ? t : s)!;
@@ -23816,7 +23819,16 @@ namespace ts {
 
             function getNarrowedType(type: Type, candidate: Type, assumeTrue: boolean, isRelated: (source: Type, target: Type) => boolean) {
                 if (!assumeTrue) {
-                    return filterType(type, t => !isRelated(t, candidate));
+                    return filterType(type, t => {
+                        if (!isRelated(t, candidate)) {
+                            return true;
+                        }
+                        const constraint = getBaseConstraintOfType(t);
+                        if (constraint && constraint !== t) {
+                            return !isRelated(constraint, candidate);
+                        }
+                        return false;
+                    });
                 }
                 // If the current type is a union type, remove all constituents that couldn't be instances of
                 // the candidate type. If one or more constituents remain, return a union of those.
