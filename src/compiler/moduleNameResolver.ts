@@ -43,11 +43,12 @@ namespace ts {
         packageId: PackageId | undefined;
         /**
          * When the resolved is not created from cache, the value is
-         *  - string if original Path if it is symbolic link to the resolved path
-         *  - undefined if path is not a symbolic link
+         *  - string if it is symbolic link to the resolved `path`
+         *  - undefined if `path` is not a symbolic link
          * When the resolved is created using value from cache of ResolvedModuleWithFailedLookupLocations, the value is:
-         *  - string if original Path if it is symbolic link to the resolved path
-         *  - true if path is not a symbolic link - this indicates that the originalPath calculation is already done and needs to be skipped
+         *  - string if it is symbolic link to the resolved `path`
+         *  - true if `path` is not a symbolic link - this indicates that the `originalPath` calculation is already done and needs to be skipped
+         * Note: This is a file name with preserved original casing, not a normalized `Path`.
          */
         originalPath?: string | true;
     }
@@ -339,7 +340,13 @@ namespace ts {
         if (resolved) {
             const { fileName, packageId } = resolved;
             const resolvedFileName = options.preserveSymlinks ? fileName : realPath(fileName, host, traceEnabled);
-            resolvedTypeReferenceDirective = { primary, resolvedFileName, packageId, isExternalLibraryImport: pathContainsNodeModules(fileName) };
+            resolvedTypeReferenceDirective = {
+                primary,
+                resolvedFileName,
+                originalPath: fileName === resolvedFileName ? undefined : fileName,
+                packageId,
+                isExternalLibraryImport: pathContainsNodeModules(fileName),
+            };
         }
         result = { resolvedTypeReferenceDirective, failedLookupLocations };
         perFolderCache?.set(typeReferenceDirectiveName, result);
@@ -1150,7 +1157,7 @@ namespace ts {
             }
             const resolvedFromFile = loadModuleFromFile(extensions, candidate, onlyRecordFailures, state);
             if (resolvedFromFile) {
-                const packageDirectory = considerPackageJson ? parseNodeModuleFromPath(resolvedFromFile) : undefined;
+                const packageDirectory = considerPackageJson ? parseNodeModuleFromPath(resolvedFromFile.path) : undefined;
                 const packageInfo = packageDirectory ? getPackageJsonInfo(packageDirectory, /*onlyRecordFailures*/ false, state) : undefined;
                 return withPackageId(packageInfo, resolvedFromFile);
             }
@@ -1184,8 +1191,9 @@ namespace ts {
      *   For `/node_modules/@types/foo/bar/index.d.ts` this is packageDirectory: "@types/foo"
      *   For `/node_modules/foo/bar/index.d.ts` this is packageDirectory: "foo"
      */
-    function parseNodeModuleFromPath(resolved: PathAndExtension): string | undefined {
-        const path = normalizePath(resolved.path);
+    /* @internal */
+    export function parseNodeModuleFromPath(resolved: string): string | undefined {
+        const path = normalizePath(resolved);
         const idx = path.lastIndexOf(nodeModulesPathPart);
         if (idx === -1) {
             return undefined;
