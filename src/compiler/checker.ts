@@ -12605,6 +12605,11 @@ namespace ts {
             return indexSymbol && getIndexDeclarationOfIndexSymbol(indexSymbol, kind);
         }
 
+        function getIndexDeclarationOfSymbolTable(symbolTable: SymbolTable | undefined, kind: IndexKind): IndexSignatureDeclaration | undefined {
+            const indexSymbol = symbolTable && getIndexSymbolFromSymbolTable(symbolTable);
+            return indexSymbol && getIndexDeclarationOfIndexSymbol(indexSymbol, kind);
+        }
+
         function getIndexDeclarationOfIndexSymbol(indexSymbol: Symbol, kind: IndexKind): IndexSignatureDeclaration | undefined {
             const syntaxKind = kind === IndexKind.Number ? SyntaxKind.NumberKeyword : SyntaxKind.StringKeyword;
             if (indexSymbol?.declarations) {
@@ -20320,14 +20325,17 @@ namespace ts {
         }
 
         function getGlobalNonNullableTypeInstantiation(type: Type) {
+            // First reduce away any constituents that are assignable to 'undefined' or 'null'. This not only eliminates
+            // 'undefined' and 'null', but also higher-order types such as a type parameter 'U extends undefined | null'
+            // that isn't eliminated by a NonNullable<T> instantiation.
+            const reducedType = getTypeWithFacts(type, TypeFacts.NEUndefinedOrNull);
             if (!deferredGlobalNonNullableTypeAlias) {
                 deferredGlobalNonNullableTypeAlias = getGlobalSymbol("NonNullable" as __String, SymbolFlags.TypeAlias, /*diagnostic*/ undefined) || unknownSymbol;
             }
-            // Use NonNullable global type alias if available to improve quick info/declaration emit
-            if (deferredGlobalNonNullableTypeAlias !== unknownSymbol) {
-                return getTypeAliasInstantiation(deferredGlobalNonNullableTypeAlias, [type]);
-            }
-            return getTypeWithFacts(type, TypeFacts.NEUndefinedOrNull); // Type alias unavailable, fall back to non-higher-order behavior
+            // If the NonNullable<T> type is available, return an instantiation. Otherwise just return the reduced type.
+            return deferredGlobalNonNullableTypeAlias !== unknownSymbol ?
+                getTypeAliasInstantiation(deferredGlobalNonNullableTypeAlias, [reducedType]) :
+                reducedType;
         }
 
         function getNonNullableType(type: Type): Type {
@@ -24119,7 +24127,7 @@ namespace ts {
         }
 
         function isGenericTypeWithUnionConstraint(type: Type) {
-            return !!(type.flags & TypeFlags.Instantiable && getBaseConstraintOrType(type).flags & TypeFlags.Union);
+            return !!(type.flags & TypeFlags.Instantiable && getBaseConstraintOrType(type).flags & (TypeFlags.Nullable | TypeFlags.Union));
         }
 
         function containsGenericType(type: Type): boolean {
@@ -36868,15 +36876,16 @@ namespace ts {
             }
         }
 
-        function checkIndexConstraints(type: Type) {
-            const declaredNumberIndexer = getIndexDeclarationOfSymbol(type.symbol, IndexKind.Number);
-            const declaredStringIndexer = getIndexDeclarationOfSymbol(type.symbol, IndexKind.String);
+        function checkIndexConstraints(type: Type, isStatic?: boolean) {
+            const declaredNumberIndexer = getIndexDeclarationOfSymbolTable(isStatic ? type.symbol?.exports : type.symbol?.members, IndexKind.Number);
+            const declaredStringIndexer = getIndexDeclarationOfSymbolTable(isStatic ? type.symbol?.exports : type.symbol?.members, IndexKind.String);
 
             const stringIndexType = getIndexTypeOfType(type, IndexKind.String);
             const numberIndexType = getIndexTypeOfType(type, IndexKind.Number);
 
             if (stringIndexType || numberIndexType) {
                 forEach(getPropertiesOfObjectType(type), prop => {
+                    if (isStatic && prop.flags & SymbolFlags.Prototype) return;
                     const propType = getTypeOfSymbol(prop);
                     checkIndexConstraintForProperty(prop, propType, type, declaredStringIndexer, stringIndexType, IndexKind.String);
                     checkIndexConstraintForProperty(prop, propType, type, declaredNumberIndexer, numberIndexType, IndexKind.Number);
@@ -37255,7 +37264,7 @@ namespace ts {
 
             if (produceDiagnostics) {
                 checkIndexConstraints(type);
-                checkIndexConstraints(staticType);
+                checkIndexConstraints(staticType, /*isStatic*/ true);
                 checkTypeForDuplicateIndexSignatures(node);
                 checkPropertyInitialization(node);
             }
@@ -37299,7 +37308,10 @@ namespace ts {
 
                     const baseClassName = typeToString(baseWithThis);
                     if (prop && !baseProp && hasOverride) {
-                        error(member, Diagnostics.This_member_cannot_have_an_override_modifier_because_it_is_not_declared_in_the_base_class_0, baseClassName);
+                        const suggestion = getSpellingSuggestionForName(symbolName(declaredProp), arrayFrom(getMembersOfSymbol(baseType.symbol).values()), SymbolFlags.ClassMember);
+                        suggestion ?
+                            error(member, Diagnostics.This_member_cannot_have_an_override_modifier_because_it_is_not_declared_in_the_base_class_0_Did_you_mean_1, baseClassName, symbolToString(suggestion)) :
+                            error(member, Diagnostics.This_member_cannot_have_an_override_modifier_because_it_is_not_declared_in_the_base_class_0, baseClassName);
                     }
                     else if (prop && baseProp?.valueDeclaration && compilerOptions.noImplicitOverride && !nodeInAmbientContext) {
                         const baseHasAbstract = hasAbstractModifier(baseProp.valueDeclaration);
@@ -39316,14 +39328,21 @@ namespace ts {
                     return undefined;
                 }
 
-                const isJSDoc = findAncestor(name, or(isJSDocLink, isJSDocNameReference, isJSDocMemberName));
+                const isJSDoc = findAncestor(name, or(isJSDocLinkLike, isJSDocNameReference, isJSDocMemberName));
                 const meaning = isJSDoc ? SymbolFlags.Type | SymbolFlags.Namespace | SymbolFlags.Value : SymbolFlags.Value;
                 if (name.kind === SyntaxKind.Identifier) {
                     if (isJSXTagName(name) && isJsxIntrinsicIdentifier(name)) {
                         const symbol = getIntrinsicTagSymbol(name.parent as JsxOpeningLikeElement);
                         return symbol === unknownSymbol ? undefined : symbol;
                     }
-                    return resolveEntityName(name, meaning, /*ignoreErrors*/ false, /*dontResolveAlias*/ !isJSDoc, getHostSignatureFromJSDoc(name));
+                    const result = resolveEntityName(name, meaning, /*ignoreErrors*/ false, /*dontResolveAlias*/ !isJSDoc, getHostSignatureFromJSDoc(name));
+                    if (!result && isJSDoc) {
+                        const container = findAncestor(name, or(isClassLike, isInterfaceDeclaration));
+                        if (container) {
+                            return resolveJSDocMemberName(name, getSymbolOfNode(container));
+                        }
+                    }
+                    return result;
                 }
                 else if (name.kind === SyntaxKind.PropertyAccessExpression || name.kind === SyntaxKind.QualifiedName) {
                     const links = getNodeLinks(name);
@@ -39362,25 +39381,27 @@ namespace ts {
          * 1. K#m as K.prototype.m for a class (or other value) K
          * 2. K.m as K.prototype.m
          * 3. I.m as I.m for a type I, or any other I.m that fails to resolve in (1) or (2)
+         *
+         * For unqualified names, a container K may be provided as a second argument.
          */
-        function resolveJSDocMemberName(name: EntityName | JSDocMemberName): Symbol | undefined {
+        function resolveJSDocMemberName(name: EntityName | JSDocMemberName, container?: Symbol): Symbol | undefined {
             if (isEntityName(name)) {
-                const symbol = resolveEntityName(
-                    name,
-                    SymbolFlags.Type | SymbolFlags.Namespace | SymbolFlags.Value,
-                    /*ignoreErrors*/ false,
-                    /*dontResolveAlias*/ true,
-                    getHostSignatureFromJSDoc(name));
-                if (symbol || isIdentifier(name)) {
-                    // can't recur on identifier, so just return when it's undefined
+                // resolve static values first
+                const meaning = SymbolFlags.Type | SymbolFlags.Namespace | SymbolFlags.Value;
+                let symbol = resolveEntityName(name, meaning, /*ignoreErrors*/ false, /*dontResolveAlias*/ true, getHostSignatureFromJSDoc(name));
+                if (!symbol && isIdentifier(name) && container) {
+                    symbol = getMergedSymbol(getSymbol(getExportsOfSymbol(container), name.escapedText, meaning));
+                }
+                if (symbol) {
                     return symbol;
                 }
             }
-            const left = resolveJSDocMemberName(name.left);
+            const left = isIdentifier(name) ? container : resolveJSDocMemberName(name.left);
+            const right = isIdentifier(name) ? name.escapedText : name.right.escapedText;
             if (left) {
                 const proto = left.flags & SymbolFlags.Value && getPropertyOfType(getTypeOfSymbol(left), "prototype" as __String);
                 const t = proto ? getTypeOfSymbol(proto) : getDeclaredTypeOfSymbol(left);
-                return getPropertyOfType(t, name.right.escapedText);
+                return getPropertyOfType(t, right);
             }
         }
 
