@@ -16023,8 +16023,7 @@ namespace ts {
         }
 
         function maybeTypeParameterReference(node: Node) {
-            return !(node.kind === SyntaxKind.QualifiedName ||
-                node.parent.kind === SyntaxKind.TypeReference && (node.parent as TypeReferenceNode).typeArguments && node === (node.parent as TypeReferenceNode).typeName ||
+            return !(node.parent.kind === SyntaxKind.TypeReference && (node.parent as TypeReferenceNode).typeArguments && node === (node.parent as TypeReferenceNode).typeName ||
                 node.parent.kind === SyntaxKind.ImportType && (node.parent as ImportTypeNode).typeArguments && node === (node.parent as ImportTypeNode).qualifier);
         }
 
@@ -16053,7 +16052,10 @@ namespace ts {
                         return true;
                     case SyntaxKind.MethodDeclaration:
                     case SyntaxKind.MethodSignature:
-                        return (!(node as FunctionLikeDeclaration).type && !!(node as FunctionLikeDeclaration).body) || !!forEachChild(node, containsReference);
+                        return !(node as FunctionLikeDeclaration).type && !!(node as FunctionLikeDeclaration).body ||
+                            some((node as FunctionLikeDeclaration).typeParameters, containsReference) ||
+                            some((node as FunctionLikeDeclaration).parameters, containsReference) ||
+                            !!(node as FunctionLikeDeclaration).type && containsReference((node as FunctionLikeDeclaration).type!);
                 }
                 return !!forEachChild(node, containsReference);
             }
@@ -21725,12 +21727,14 @@ namespace ts {
             }
 
             function inferFromIndexTypes(source: Type, target: Type) {
+                // Inferences across mapped type index signatures are pretty much the same a inferences to homomorphic variables
+                const priority = (getObjectFlags(source) & getObjectFlags(target) & ObjectFlags.Mapped) ? InferencePriority.HomomorphicMappedType : 0;
                 const targetStringIndexType = getIndexTypeOfType(target, IndexKind.String);
                 if (targetStringIndexType) {
                     const sourceIndexType = getIndexTypeOfType(source, IndexKind.String) ||
                         getImplicitIndexTypeOfType(source, IndexKind.String);
                     if (sourceIndexType) {
-                        inferFromTypes(sourceIndexType, targetStringIndexType);
+                        inferWithPriority(sourceIndexType, targetStringIndexType, priority);
                     }
                 }
                 const targetNumberIndexType = getIndexTypeOfType(target, IndexKind.Number);
@@ -21739,7 +21743,7 @@ namespace ts {
                         getIndexTypeOfType(source, IndexKind.String) ||
                         getImplicitIndexTypeOfType(source, IndexKind.Number);
                     if (sourceIndexType) {
-                        inferFromTypes(sourceIndexType, targetNumberIndexType);
+                        inferWithPriority(sourceIndexType, targetNumberIndexType, priority);
                     }
                 }
             }
