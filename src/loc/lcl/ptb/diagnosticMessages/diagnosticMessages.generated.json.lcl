@@ -800,6 +800,15 @@
         </Str>
         <Disp Icon="Str" />
       </Item>
+      <Item ItemId=";A_return_statement_cannot_be_used_inside_a_class_static_block_18041" ItemType="0" PsrId="306" Leaf="true">
+        <Str Cat="Text">
+          <Val><![CDATA[A 'return' statement cannot be used inside a class static block.]]></Val>
+          <Tgt Cat="Text" Stat="Loc" Orig="New">
+            <Val><![CDATA[Não é possível usar uma instrução “return” dentro de um bloco estático de classe.]]></Val>
+          </Tgt>
+        </Str>
+        <Disp Icon="Str" />
+      </Item>
       <Item ItemId=";A_series_of_entries_which_re_map_imports_to_lookup_locations_relative_to_the_baseUrl_6167" ItemType="0" PsrId="306" Leaf="true">
         <Str Cat="Text">
           <Val><![CDATA[A series of entries which re-map imports to lookup locations relative to the 'baseUrl'.]]></Val>
@@ -2087,29 +2096,20 @@
         </Str>
         <Disp Icon="Str" />
       </Item>
-      <Item ItemId=";An_index_signature_parameter_type_cannot_be_a_type_alias_Consider_writing_0_Colon_1_Colon_2_instead_1336" ItemType="0" PsrId="306" Leaf="true">
+      <Item ItemId=";An_index_signature_parameter_type_cannot_be_a_literal_type_or_generic_type_Consider_using_a_mapped_o_1337" ItemType="0" PsrId="306" Leaf="true">
         <Str Cat="Text">
-          <Val><![CDATA[An index signature parameter type cannot be a type alias. Consider writing '[{0}: {1}]5D;: {2}' instead.]]></Val>
+          <Val><![CDATA[An index signature parameter type cannot be a literal type or generic type. Consider using a mapped object type instead.]]></Val>
           <Tgt Cat="Text" Stat="Loc" Orig="New">
-            <Val><![CDATA[Um tipo de parâmetro de assinatura de índice não pode ser um alias de tipo. Considere gravar ' [{0}: {1}]5D;: {2}' em vez disso.]]></Val>
+            <Val><![CDATA[Um tipo de parâmetro de assinatura de índice não pode ser um tipo literal ou genérico. Considere usar um tipo de objeto mapeado.]]></Val>
           </Tgt>
         </Str>
         <Disp Icon="Str" />
       </Item>
-      <Item ItemId=";An_index_signature_parameter_type_cannot_be_a_union_type_Consider_using_a_mapped_object_type_instead_1337" ItemType="0" PsrId="306" Leaf="true">
+      <Item ItemId=";An_index_signature_parameter_type_must_be_string_number_symbol_or_a_template_literal_type_1268" ItemType="0" PsrId="306" Leaf="true">
         <Str Cat="Text">
-          <Val><![CDATA[An index signature parameter type cannot be a union type. Consider using a mapped object type instead.]]></Val>
+          <Val><![CDATA[An index signature parameter type must be 'string', 'number', 'symbol', or a template literal type.]]></Val>
           <Tgt Cat="Text" Stat="Loc" Orig="New">
-            <Val><![CDATA[Um tipo de parâmetro de assinatura de índice não pode ser um tipo de união. Considere usar um tipo de objeto mapeado em vez disso.]]></Val>
-          </Tgt>
-        </Str>
-        <Disp Icon="Str" />
-      </Item>
-      <Item ItemId=";An_index_signature_parameter_type_must_be_either_string_or_number_1023" ItemType="0" PsrId="306" Leaf="true">
-        <Str Cat="Text">
-          <Val><![CDATA[An index signature parameter type must be either 'string' or 'number'.]]></Val>
-          <Tgt Cat="Text" Stat="Loc" Orig="New">
-            <Val><![CDATA[Um tipo de parâmetro de assinatura de índice deve ser 'string' ou 'number'.]]></Val>
+            <Val><![CDATA[Um tipo de parâmetro de assinatura de índice deve ser 'cadeia de caracteres', 'número', 'símbolo' ou um tipo literal de modelo.]]></Val>
           </Tgt>
         </Str>
         <Disp Icon="Str" />
@@ -2383,6 +2383,15 @@
           <Val><![CDATA[Auto discovery for typings is enabled in project '{0}'. Running extra resolution pass for module '{1}' using cache location '{2}'.]]></Val>
           <Tgt Cat="Text" Stat="Loc" Orig="New">
             <Val><![CDATA[A descoberta automática para digitações está habilitada no projeto '{0}'. Executando o passe de resolução extra para o módulo '{1}' usando o local do cache '{2}'.]]></Val>
+          </Tgt>
+        </Str>
+        <Disp Icon="Str" />
+      </Item>
+      <Item ItemId=";Await_expression_cannot_be_used_inside_a_class_static_block_18037" ItemType="0" PsrId="306" Leaf="true">
+        <Str Cat="Text">
+          <Val><![CDATA[Await expression cannot be used inside a class static block.]]></Val>
+          <Tgt Cat="Text" Stat="Loc" Orig="New">
+            <Val><![CDATA[A expressão Await não pode ser usada dentro de um bloco estático de classe.]]></Val>
           </Tgt>
         </Str>
         <Disp Icon="Str" />
@@ -3241,6 +3250,15 @@
           <Val><![CDATA[Cannot use namespace '{0}' as a value.]]></Val>
           <Tgt Cat="Text" Stat="Loc" Orig="New">
             <Val><![CDATA[Não é possível usar o namespace '{0}' como um valor.]]></Val>
+          </Tgt>
+        </Str>
+        <Disp Icon="Str" />
+      </Item>
+      <Item ItemId=";Cannot_use_this_in_a_static_property_initializer_of_a_decorated_class_2816" ItemType="0" PsrId="306" Leaf="true">
+        <Str Cat="Text">
+          <Val><![CDATA[Cannot use 'this' in a static property initializer of a decorated class.]]></Val>
+          <Tgt Cat="Text" Stat="Loc" Orig="New">
+            <Val><![CDATA[Não é possível usar "this" em um inicializador de propriedade estática de uma classe decorada.]]></Val>
           </Tgt>
         </Str>
         <Disp Icon="Str" />
@@ -5168,6 +5186,15 @@
         </Str>
         <Disp Icon="Str" />
       </Item>
+      <Item ItemId=";Duplicate_index_signature_for_type_0_2374" ItemType="0" PsrId="306" Leaf="true">
+        <Str Cat="Text">
+          <Val><![CDATA[Duplicate index signature for type '{0}'.]]></Val>
+          <Tgt Cat="Text" Stat="Loc" Orig="New">
+            <Val><![CDATA[Assinatura de índice duplicada para o tipo '{0}'.]]></Val>
+          </Tgt>
+        </Str>
+        <Disp Icon="Str" />
+      </Item>
       <Item ItemId=";Duplicate_label_0_1114" ItemType="0" PsrId="306" Leaf="true">
         <Str Cat="Text">
           <Val><![CDATA[Duplicate label '{0}'.]]></Val>
@@ -5180,29 +5207,11 @@
         </Str>
         <Disp Icon="Str" />
       </Item>
-      <Item ItemId=";Duplicate_number_index_signature_2375" ItemType="0" PsrId="306" Leaf="true">
-        <Str Cat="Text">
-          <Val><![CDATA[Duplicate number index signature.]]></Val>
-          <Tgt Cat="Text" Stat="Loc" Orig="New">
-            <Val><![CDATA[Assinatura de índice de número duplicado.]]></Val>
-          </Tgt>
-        </Str>
-        <Disp Icon="Str" />
-      </Item>
       <Item ItemId=";Duplicate_property_0_2718" ItemType="0" PsrId="306" Leaf="true">
         <Str Cat="Text">
           <Val><![CDATA[Duplicate property '{0}'.]]></Val>
           <Tgt Cat="Text" Stat="Loc" Orig="New">
             <Val><![CDATA[Propriedade '{0}' duplicada.]]></Val>
-          </Tgt>
-        </Str>
-        <Disp Icon="Str" />
-      </Item>
-      <Item ItemId=";Duplicate_string_index_signature_2374" ItemType="0" PsrId="306" Leaf="true">
-        <Str Cat="Text">
-          <Val><![CDATA[Duplicate string index signature.]]></Val>
-          <Tgt Cat="Text" Stat="Loc" Orig="New">
-            <Val><![CDATA[Assinatura de índice de cadeia de caracteres duplicada.]]></Val>
           </Tgt>
         </Str>
         <Disp Icon="Str" />
@@ -6539,6 +6548,15 @@
         </Str>
         <Disp Icon="Str" />
       </Item>
+      <Item ItemId=";For_await_loops_cannot_be_used_inside_a_class_static_block_18038" ItemType="0" PsrId="306" Leaf="true">
+        <Str Cat="Text">
+          <Val><![CDATA['For await' loops cannot be used inside a class static block.]]></Val>
+          <Tgt Cat="Text" Stat="Loc" Orig="New">
+            <Val><![CDATA[Os loops “For Await” não podem ser usados dentro de um bloco estático de classe.]]></Val>
+          </Tgt>
+        </Str>
+        <Disp Icon="Str" />
+      </Item>
       <Item ItemId=";Found_0_errors_6217" ItemType="0" PsrId="306" Leaf="true">
         <Str Cat="Text">
           <Val><![CDATA[Found {0} errors.]]></Val>
@@ -7301,29 +7319,20 @@
         </Str>
         <Disp Icon="Str" />
       </Item>
+      <Item ItemId=";Index_signature_for_type_0_is_missing_in_type_1_2329" ItemType="0" PsrId="306" Leaf="true">
+        <Str Cat="Text">
+          <Val><![CDATA[Index signature for type '{0}' is missing in type '{1}'.]]></Val>
+          <Tgt Cat="Text" Stat="Loc" Orig="New">
+            <Val><![CDATA[A assinatura do índice para o tipo '{0}' está ausente no tipo '{1}'.]]></Val>
+          </Tgt>
+        </Str>
+        <Disp Icon="Str" />
+      </Item>
       <Item ItemId=";Index_signature_in_type_0_only_permits_reading_2542" ItemType="0" PsrId="306" Leaf="true">
         <Str Cat="Text">
           <Val><![CDATA[Index signature in type '{0}' only permits reading.]]></Val>
           <Tgt Cat="Text" Stat="Loc" Orig="New">
             <Val><![CDATA[Assinatura de índice no tipo '{0}' permite somente leitura.]]></Val>
-          </Tgt>
-        </Str>
-        <Disp Icon="Str" />
-      </Item>
-      <Item ItemId=";Index_signature_is_missing_in_type_0_2329" ItemType="0" PsrId="306" Leaf="true">
-        <Str Cat="Text">
-          <Val><![CDATA[Index signature is missing in type '{0}'.]]></Val>
-          <Tgt Cat="Text" Stat="Loc" Orig="New">
-            <Val><![CDATA[Assinatura de índice ausente no tipo '{0}'.]]></Val>
-          </Tgt>
-        </Str>
-        <Disp Icon="Str" />
-      </Item>
-      <Item ItemId=";Index_signatures_are_incompatible_2330" ItemType="0" PsrId="306" Leaf="true">
-        <Str Cat="Text">
-          <Val><![CDATA[Index signatures are incompatible.]]></Val>
-          <Tgt Cat="Text" Stat="Loc" Orig="New">
-            <Val><![CDATA[As assinaturas de índice são incompatíveis.]]></Val>
           </Tgt>
         </Str>
         <Disp Icon="Str" />
@@ -7582,6 +7591,15 @@
           <Val><![CDATA[Invalid use of '{0}'. Class definitions are automatically in strict mode.]]></Val>
           <Tgt Cat="Text" Stat="Loc" Orig="New">
             <Val><![CDATA[Uso inválido de '{0}'. Definições de classe estão automaticamente no modo estrito.]]></Val>
+          </Tgt>
+        </Str>
+        <Disp Icon="Str" />
+      </Item>
+      <Item ItemId=";Invalid_use_of_0_It_cannot_be_used_inside_a_class_static_block_18039" ItemType="0" PsrId="306" Leaf="true">
+        <Str Cat="Text">
+          <Val><![CDATA[Invalid use of '{0}'. It cannot be used inside a class static block.]]></Val>
+          <Tgt Cat="Text" Stat="Loc" Orig="New">
+            <Val><![CDATA[Uso inválido de “{0}”. Ele não pode ser usado dentro de um bloco estático de classe.]]></Val>
           </Tgt>
         </Str>
         <Disp Icon="Str" />
@@ -8689,15 +8707,6 @@
           <Val><![CDATA[Not all constituents of type '{0}' are constructable.]]></Val>
           <Tgt Cat="Text" Stat="Loc" Orig="New">
             <Val><![CDATA[Nem todos os membros do tipo '{0}' são construídos.]]></Val>
-          </Tgt>
-        </Str>
-        <Disp Icon="Str" />
-      </Item>
-      <Item ItemId=";Numeric_index_type_0_is_not_assignable_to_string_index_type_1_2413" ItemType="0" PsrId="306" Leaf="true">
-        <Str Cat="Text">
-          <Val><![CDATA[Numeric index type '{0}' is not assignable to string index type '{1}'.]]></Val>
-          <Tgt Cat="Text" Stat="Loc" Orig="New">
-            <Val><![CDATA[O tipo de índice numérico '{0}' não é atribuível ao tipo de índice de cadeia de caracteres '{1}'.]]></Val>
           </Tgt>
         </Str>
         <Disp Icon="Str" />
@@ -10016,6 +10025,15 @@
         </Str>
         <Disp Icon="Str" />
       </Item>
+      <Item ItemId=";Property_0_has_no_initializer_and_is_not_definitely_assigned_in_a_class_static_block_2817" ItemType="0" PsrId="306" Leaf="true">
+        <Str Cat="Text">
+          <Val><![CDATA[Property '{0}' has no initializer and is not definitely assigned in a class static block.]]></Val>
+          <Tgt Cat="Text" Stat="Loc" Orig="New">
+            <Val><![CDATA[A propriedade “{0}” não tem nenhum inicializador e não está definitivamente atribuída no bloco estático de classe.]]></Val>
+          </Tgt>
+        </Str>
+        <Disp Icon="Str" />
+      </Item>
       <Item ItemId=";Property_0_has_no_initializer_and_is_not_definitely_assigned_in_the_constructor_2564" ItemType="0" PsrId="306" Leaf="true">
         <Str Cat="Text">
           <Val><![CDATA[Property '{0}' has no initializer and is not definitely assigned in the constructor.]]></Val>
@@ -10280,20 +10298,11 @@
         </Str>
         <Disp Icon="Str" />
       </Item>
-      <Item ItemId=";Property_0_of_type_1_is_not_assignable_to_numeric_index_type_2_2412" ItemType="0" PsrId="306" Leaf="true">
+      <Item ItemId=";Property_0_of_type_1_is_not_assignable_to_2_index_type_3_2411" ItemType="0" PsrId="306" Leaf="true">
         <Str Cat="Text">
-          <Val><![CDATA[Property '{0}' of type '{1}' is not assignable to numeric index type '{2}'.]]></Val>
+          <Val><![CDATA[Property '{0}' of type '{1}' is not assignable to '{2}' index type '{3}'.]]></Val>
           <Tgt Cat="Text" Stat="Loc" Orig="New">
-            <Val><![CDATA[A propriedade '{0}' do tipo '{1}' não é atribuível ao tipo de índice numérico '{2}'.]]></Val>
-          </Tgt>
-        </Str>
-        <Disp Icon="Str" />
-      </Item>
-      <Item ItemId=";Property_0_of_type_1_is_not_assignable_to_string_index_type_2_2411" ItemType="0" PsrId="306" Leaf="true">
-        <Str Cat="Text">
-          <Val><![CDATA[Property '{0}' of type '{1}' is not assignable to string index type '{2}'.]]></Val>
-          <Tgt Cat="Text" Stat="Loc" Orig="New">
-            <Val><![CDATA[A propriedade '{0}' do tipo '{1}' não é atribuível ao tipo de índice de cadeia de caracteres '{2}'.]]></Val>
+            <Val><![CDATA[A propriedade '{0}' do tipo '{1}' não pode ser atribuída ao '{2}' tipo de índice '{3}'.]]></Val>
           </Tgt>
         </Str>
         <Disp Icon="Str" />
@@ -14936,6 +14945,15 @@
         </Str>
         <Disp Icon="Str" />
       </Item>
+      <Item ItemId=";_0_and_1_index_signatures_are_incompatible_2330" ItemType="0" PsrId="306" Leaf="true">
+        <Str Cat="Text">
+          <Val><![CDATA['{0}' and '{1}' index signatures are incompatible.]]></Val>
+          <Tgt Cat="Text" Stat="Loc" Orig="New">
+            <Val><![CDATA[As assinaturas de índice '{0}' e '{1}' são incompatíveis.]]></Val>
+          </Tgt>
+        </Str>
+        <Disp Icon="Str" />
+      </Item>
       <Item ItemId=";_0_and_1_operations_cannot_be_mixed_without_parentheses_5076" ItemType="0" PsrId="306" Leaf="true">
         <Str Cat="Text">
           <Val><![CDATA['{0}' and '{1}' operations cannot be mixed without parentheses.]]></Val>
@@ -15112,6 +15130,24 @@
           <Val><![CDATA['{0}' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.]]></Val>
           <Tgt Cat="Text" Stat="Loc" Orig="New">
             <Val><![CDATA[Implicitamente, '{0}' tem o tipo 'any' porque não tem uma anotação de tipo e é referenciado direta ou indiretamente em seu próprio inicializador.]]></Val>
+          </Tgt>
+        </Str>
+        <Disp Icon="Str" />
+      </Item>
+      <Item ItemId=";_0_index_signatures_are_incompatible_2634" ItemType="0" PsrId="306" Leaf="true">
+        <Str Cat="Text">
+          <Val><![CDATA['{0}' index signatures are incompatible.]]></Val>
+          <Tgt Cat="Text" Stat="Loc" Orig="New">
+            <Val><![CDATA['{0}' assinaturas de índice são incompatíveis.]]></Val>
+          </Tgt>
+        </Str>
+        <Disp Icon="Str" />
+      </Item>
+      <Item ItemId=";_0_index_type_1_is_not_assignable_to_2_index_type_3_2413" ItemType="0" PsrId="306" Leaf="true">
+        <Str Cat="Text">
+          <Val><![CDATA['{0}' index type '{1}' is not assignable to '{2}' index type '{3}'.]]></Val>
+          <Tgt Cat="Text" Stat="Loc" Orig="New">
+            <Val><![CDATA['{0}' tipo de índice '{1}' não pode ser atribuído a '{2}' tipo de índice '{3}'.]]></Val>
           </Tgt>
         </Str>
         <Disp Icon="Str" />
@@ -15517,6 +15553,15 @@
           <Val><![CDATA[and here.]]></Val>
           <Tgt Cat="Text" Stat="Loc" Orig="New">
             <Val><![CDATA[e aqui.]]></Val>
+          </Tgt>
+        </Str>
+        <Disp Icon="Str" />
+      </Item>
+      <Item ItemId=";arguments_cannot_be_referenced_in_property_initializers_2815" ItemType="0" PsrId="306" Leaf="true">
+        <Str Cat="Text">
+          <Val><![CDATA['arguments' cannot be referenced in property initializers.]]></Val>
+          <Tgt Cat="Text" Stat="Loc" Orig="New">
+            <Val><![CDATA['argumentos' não podem ser referenciados em inicializadores de propriedade.]]></Val>
           </Tgt>
         </Str>
         <Disp Icon="Str" />

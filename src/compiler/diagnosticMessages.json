@@ -3344,6 +3344,14 @@
         "category": "Error",
         "code": 2815
     },
+    "Cannot use 'this' in a static property initializer of a decorated class.": {
+        "category": "Error",
+        "code": 2816
+    },
+    "Property '{0}' has no initializer and is not definitely assigned in a class static block.": {
+        "category": "Error",
+        "code": 2817
+    },
 
     "Import declaration '{0}' is using private name '{1}'.": {
         "category": "Error",
@@ -7154,5 +7162,21 @@
     "Class decorators can't be used with static private identifier. Consider removing the experimental decorator.": {
         "category": "Error",
         "code": 18036
+    },
+    "Await expression cannot be used inside a class static block.": {
+        "category": "Error",
+        "code": 18037
+    },
+    "'For await' loops cannot be used inside a class static block.": {
+        "category": "Error",
+        "code": 18038
+    },
+    "Invalid use of '{0}'. It cannot be used inside a class static block.": {
+        "category": "Error",
+        "code": 18039
+    },
+    "A 'return' statement cannot be used inside a class static block.": {
+        "category": "Error",
+        "code": 18041
     }
 }

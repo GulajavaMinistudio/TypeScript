@@ -428,6 +428,7 @@ namespace ts {
                 return node ? getTypeFromTypeNode(node) : errorType;
             },
             getParameterType: getTypeAtPosition,
+            getParameterIdentifierNameAtPosition,
             getPromisedTypeOfPromise,
             getAwaitedType: type => getAwaitedType(type),
             getReturnTypeOfSignature,
@@ -1578,21 +1579,34 @@ namespace ts {
                     if (isFunctionLike(current)) {
                         return true;
                     }
+                    if (isClassStaticBlockDeclaration(current)) {
+                        return declaration.pos < usage.pos;
+                    }
 
-                    const initializerOfProperty = current.parent &&
-                        current.parent.kind === SyntaxKind.PropertyDeclaration &&
-                        (current.parent as PropertyDeclaration).initializer === current;
-
-                    if (initializerOfProperty) {
-                        if (hasSyntacticModifier(current.parent, ModifierFlags.Static)) {
-                            if (declaration.kind === SyntaxKind.MethodDeclaration) {
-                                return true;
+                    const propertyDeclaration = tryCast(current.parent, isPropertyDeclaration);
+                    if (propertyDeclaration) {
+                        const initializerOfProperty = propertyDeclaration.initializer === current;
+                        if (initializerOfProperty) {
+                            if (isStatic(current.parent)) {
+                                if (declaration.kind === SyntaxKind.MethodDeclaration) {
+                                    return true;
+                                }
+                                if (isPropertyDeclaration(declaration) && getContainingClass(usage) === getContainingClass(declaration)) {
+                                    const propName = declaration.name;
+                                    if (isIdentifier(propName) || isPrivateIdentifier(propName)) {
+                                        const type = getTypeOfSymbol(getSymbolOfNode(declaration));
+                                        const staticBlocks = filter(declaration.parent.members, isClassStaticBlockDeclaration);
+                                        if (isPropertyInitializedInStaticBlocks(propName, type, staticBlocks, declaration.parent.pos, current.pos)) {
+                                            return true;
+                                        }
+                                    }
+                                }
                             }
-                        }
-                        else {
-                            const isDeclarationInstanceProperty = declaration.kind === SyntaxKind.PropertyDeclaration && !hasSyntacticModifier(declaration, ModifierFlags.Static);
-                            if (!isDeclarationInstanceProperty || getContainingClass(usage) !== getContainingClass(declaration)) {
-                                return true;
+                            else {
+                                const isDeclarationInstanceProperty = declaration.kind === SyntaxKind.PropertyDeclaration && !isStatic(declaration);
+                                if (!isDeclarationInstanceProperty || getContainingClass(usage) !== getContainingClass(declaration)) {
+                                    return true;
+                                }
                             }
                         }
                     }
@@ -1856,7 +1870,7 @@ namespace ts {
                         // local variables of the constructor. This effectively means that entities from outer scopes
                         // by the same name as a constructor parameter or local variable are inaccessible
                         // in initializer expressions for instance member variables.
-                        if (!hasSyntacticModifier(location, ModifierFlags.Static)) {
+                        if (!isStatic(location)) {
                             const ctor = findConstructorDeclaration(location.parent as ClassLikeDeclaration);
                             if (ctor && ctor.locals) {
                                 if (lookup(ctor.locals, name, meaning & SymbolFlags.Value)) {
@@ -1878,7 +1892,7 @@ namespace ts {
                                 result = undefined;
                                 break;
                             }
-                            if (lastLocation && hasSyntacticModifier(lastLocation, ModifierFlags.Static)) {
+                            if (lastLocation && isStatic(lastLocation)) {
                                 // TypeScript 1.0 spec (April 2014): 3.4.1
                                 // The scope of a type parameter extends over the entire declaration with which the type
                                 // parameter list is associated, with the exception of static member declarations in classes.
@@ -2188,7 +2202,7 @@ namespace ts {
                 // initializers in instance property declaration of class like entities are executed in constructor and thus deferred
                 return isTypeQueryNode(location) || ((
                     isFunctionLikeDeclaration(location) ||
-                    (location.kind === SyntaxKind.PropertyDeclaration && !hasSyntacticModifier(location, ModifierFlags.Static))
+                    (location.kind === SyntaxKind.PropertyDeclaration && !isStatic(location))
                 ) && (!lastLocation || lastLocation !== (location as SignatureDeclaration | PropertyDeclaration).name)); // A name is evaluated within the enclosing scope - so it shouldn't count as deferred
             }
             if (lastLocation && lastLocation === (location as FunctionExpression | ArrowFunction).name) {
@@ -2257,7 +2271,7 @@ namespace ts {
 
                     // No static member is present.
                     // Check if we're in an instance method and look for a relevant instance member.
-                    if (location === container && !hasSyntacticModifier(location, ModifierFlags.Static)) {
+                    if (location === container && !isStatic(location)) {
                         const instanceType = (getDeclaredTypeOfSymbol(classSymbol) as InterfaceType).thisType!; // TODO: GH#18217
                         if (getPropertyOfType(instanceType, name)) {
                             error(errorLocation, Diagnostics.Cannot_find_name_0_Did_you_mean_the_instance_member_this_0, diagnosticName(nameArg));
@@ -4854,7 +4868,7 @@ namespace ts {
                     }
                     function shouldWriteTypeOfFunctionSymbol() {
                         const isStaticMethodSymbol = !!(symbol.flags & SymbolFlags.Method) &&  // typeof static method
-                            some(symbol.declarations, declaration => hasSyntacticModifier(declaration, ModifierFlags.Static));
+                            some(symbol.declarations, declaration => isStatic(declaration));
                         const isNonLocalFunctionSymbol = !!(symbol.flags & SymbolFlags.Function) &&
                             (symbol.parent || // is exported function symbol
                                 forEach(symbol.declarations, declaration =>
@@ -7007,7 +7021,7 @@ namespace ts {
 
                 function isNamespaceMember(p: Symbol) {
                     return !!(p.flags & (SymbolFlags.Type | SymbolFlags.Namespace | SymbolFlags.Alias)) ||
-                        !(p.flags & SymbolFlags.Prototype || p.escapedName === "prototype" || p.valueDeclaration && getEffectiveModifierFlags(p.valueDeclaration) & ModifierFlags.Static && isClassLike(p.valueDeclaration.parent));
+                        !(p.flags & SymbolFlags.Prototype || p.escapedName === "prototype" || p.valueDeclaration && isStatic(p.valueDeclaration) && isClassLike(p.valueDeclaration.parent));
                 }
 
                 function sanitizeJSDocImplements(clauses: readonly ExpressionWithTypeArguments[]): ExpressionWithTypeArguments[] | undefined {
@@ -8447,14 +8461,23 @@ namespace ts {
                 return addOptionality(type, isProperty, isOptional);
             }
 
-            if (isPropertyDeclaration(declaration) && !hasStaticModifier(declaration) && (noImplicitAny || isInJSFile(declaration))) {
+            if (isPropertyDeclaration(declaration) && (noImplicitAny || isInJSFile(declaration))) {
                 // We have a property declaration with no type annotation or initializer, in noImplicitAny mode or a .js file.
-                // Use control flow analysis of this.xxx assignments in the constructor to determine the type of the property.
-                const constructor = findConstructorDeclaration(declaration.parent);
-                const type = constructor ? getFlowTypeInConstructor(declaration.symbol, constructor) :
-                    getEffectiveModifierFlags(declaration) & ModifierFlags.Ambient ? getTypeOfPropertyInBaseClass(declaration.symbol) :
-                    undefined;
-                return type && addOptionality(type, /*isProperty*/ true, isOptional);
+                // Use control flow analysis of this.xxx assignments in the constructor or static block to determine the type of the property.
+                if (!hasStaticModifier(declaration)) {
+                    const constructor = findConstructorDeclaration(declaration.parent);
+                    const type = constructor ? getFlowTypeInConstructor(declaration.symbol, constructor) :
+                        getEffectiveModifierFlags(declaration) & ModifierFlags.Ambient ? getTypeOfPropertyInBaseClass(declaration.symbol) :
+                        undefined;
+                    return type && addOptionality(type, /*isProperty*/ true, isOptional);
+                }
+                else {
+                    const staticBlocks = filter(declaration.parent.members, isClassStaticBlockDeclaration);
+                    const type = staticBlocks.length ? getFlowTypeInStaticBlocks(declaration.symbol, staticBlocks) :
+                        getEffectiveModifierFlags(declaration) & ModifierFlags.Ambient ? getTypeOfPropertyInBaseClass(declaration.symbol) :
+                        undefined;
+                    return type && addOptionality(type, /*isProperty*/ true, isOptional);
+                }
             }
 
             if (isJsxAttribute(declaration)) {
@@ -8527,6 +8550,27 @@ namespace ts {
             setParent(reference, file);
             reference.flowNode = file.endFlowNode;
             return getFlowTypeOfReference(reference, autoType, undefinedType);
+        }
+
+        function getFlowTypeInStaticBlocks(symbol: Symbol, staticBlocks: readonly ClassStaticBlockDeclaration[]) {
+            const accessName = startsWith(symbol.escapedName as string, "__#")
+                ? factory.createPrivateIdentifier((symbol.escapedName as string).split("@")[1])
+                : unescapeLeadingUnderscores(symbol.escapedName);
+            for (const staticBlock of staticBlocks) {
+                const reference = factory.createPropertyAccessExpression(factory.createThis(), accessName);
+                setParent(reference.expression, reference);
+                setParent(reference, staticBlock);
+                reference.flowNode = staticBlock.returnFlowNode;
+                const flowType = getFlowTypeOfProperty(reference, symbol);
+                if (noImplicitAny && (flowType === autoType || flowType === autoArrayType)) {
+                    error(symbol.valueDeclaration, Diagnostics.Member_0_implicitly_has_an_1_type, symbolToString(symbol), typeToString(flowType));
+                }
+                // We don't infer a type if assignments are only null or undefined.
+                if (everyType(flowType, isNullableType)) {
+                    continue;
+                }
+                return convertAutoToAny(flowType);
+            }
         }
 
         function getFlowTypeInConstructor(symbol: Symbol, constructor: ConstructorDeclaration) {
@@ -10130,7 +10174,7 @@ namespace ts {
         }
 
         function isStaticPrivateIdentifierProperty(s: Symbol): boolean {
-            return !!s.valueDeclaration && isPrivateIdentifierClassElementDeclaration(s.valueDeclaration) && hasSyntacticModifier(s.valueDeclaration, ModifierFlags.Static);
+            return !!s.valueDeclaration && isPrivateIdentifierClassElementDeclaration(s.valueDeclaration) && isStatic(s.valueDeclaration);
         }
 
         function resolveDeclaredMembers(type: InterfaceType): InterfaceTypeWithDeclaredMembers {
@@ -15616,7 +15660,7 @@ namespace ts {
             const container = getThisContainer(node, /*includeArrowFunctions*/ false);
             const parent = container && container.parent;
             if (parent && (isClassLike(parent) || parent.kind === SyntaxKind.InterfaceDeclaration)) {
-                if (!hasSyntacticModifier(container, ModifierFlags.Static) &&
+                if (!isStatic(container) &&
                     (!isConstructorDeclaration(container) || isNodeDescendantOf(node, container.body))) {
                     return getDeclaredTypeOfClassOrInterface(getSymbolOfNode(parent as ClassLikeDeclaration | InterfaceDeclaration)).thisType!;
                 }
@@ -21998,9 +22042,35 @@ namespace ts {
                 (containsTruthyCheck(source, (target as BinaryExpression).left) || containsTruthyCheck(source, (target as BinaryExpression).right)));
         }
 
-        function getAccessedPropertyName(access: AccessExpression): __String | undefined {
+        function getPropertyAccess(expr: Expression) {
+            if (isAccessExpression(expr)) {
+                return expr;
+            }
+            if (isIdentifier(expr)) {
+                const symbol = getResolvedSymbol(expr);
+                if (isConstVariable(symbol)) {
+                    const declaration = symbol.valueDeclaration!;
+                    // Given 'const x = obj.kind', allow 'x' as an alias for 'obj.kind'
+                    if (isVariableDeclaration(declaration) && !declaration.type && declaration.initializer && isAccessExpression(declaration.initializer)) {
+                        return declaration.initializer;
+                    }
+                    // Given 'const { kind: x } = obj', allow 'x' as an alias for 'obj.kind'
+                    if (isBindingElement(declaration) && !declaration.initializer) {
+                        const parent = declaration.parent.parent;
+                        if (isVariableDeclaration(parent) && !parent.type && parent.initializer && (isIdentifier(parent.initializer) || isAccessExpression(parent.initializer))) {
+                            return declaration;
+                        }
+                    }
+                }
+            }
+            return undefined;
+        }
+
+        function getAccessedPropertyName(access: AccessExpression | BindingElement): __String | undefined {
+            let propertyName;
             return access.kind === SyntaxKind.PropertyAccessExpression ? access.name.escapedText :
-                isStringOrNumericLiteralLike(access.argumentExpression) ? escapeLeadingUnderscores(access.argumentExpression.text) :
+                access.kind === SyntaxKind.ElementAccessExpression && isStringOrNumericLiteralLike(access.argumentExpression) ? escapeLeadingUnderscores(access.argumentExpression.text) :
+                access.kind === SyntaxKind.BindingElement && (propertyName = getDestructuringPropertyName(access)) ? escapeLeadingUnderscores(propertyName) :
                 undefined;
         }
 
@@ -22031,7 +22101,7 @@ namespace ts {
                     if ((prop as TransientSymbol).isDiscriminantProperty === undefined) {
                         (prop as TransientSymbol).isDiscriminantProperty =
                             ((prop as TransientSymbol).checkFlags & CheckFlags.Discriminant) === CheckFlags.Discriminant &&
-                            !maybeTypeOfKind(getTypeOfSymbol(prop), TypeFlags.Instantiable);
+                            !maybeTypeOfKind(getTypeOfSymbol(prop), TypeFlags.Instantiable & ~TypeFlags.TemplateLiteral);
                     }
                     return !!(prop as TransientSymbol).isDiscriminantProperty;
                 }
@@ -22948,14 +23018,15 @@ namespace ts {
             }
         }
 
-        function getFlowTypeOfReference(reference: Node, declaredType: Type, initialType = declaredType, flowContainer?: Node, couldBeUninitialized?: boolean) {
+        function getFlowTypeOfReference(reference: Node, declaredType: Type, initialType = declaredType, isConstant?: boolean, flowContainer?: Node) {
             let key: string | undefined;
             let isKeySet = false;
             let flowDepth = 0;
+            let inlineLevel = 0;
             if (flowAnalysisDisabled) {
                 return errorType;
             }
-            if (!reference.flowNode || !couldBeUninitialized && !(declaredType.flags & TypeFlags.Narrowable)) {
+            if (!reference.flowNode) {
                 return declaredType;
             }
             flowInvocationCount++;
@@ -23244,8 +23315,9 @@ namespace ts {
                                 t => !(t.flags & TypeFlags.Never || t.flags & TypeFlags.StringLiteral && (t as StringLiteralType).value === "undefined"));
                         }
                     }
-                    if (isMatchingReferenceDiscriminant(expr, type)) {
-                        type = narrowTypeBySwitchOnDiscriminantProperty(type, expr as AccessExpression, flow.switchStatement, flow.clauseStart, flow.clauseEnd);
+                    const access = getDiscriminantPropertyAccess(expr, type);
+                    if (access) {
+                        type = narrowTypeBySwitchOnDiscriminantProperty(type, access, flow.switchStatement, flow.clauseStart, flow.clauseEnd);
                     }
                 }
                 return createFlowType(type, isIncomplete(flowType));
@@ -23402,19 +23474,16 @@ namespace ts {
                 return result;
             }
 
-            function isMatchingReferenceDiscriminant(expr: Expression, computedType: Type) {
+            function getDiscriminantPropertyAccess(expr: Expression, computedType: Type) {
+                let access, name;
                 const type = declaredType.flags & TypeFlags.Union ? declaredType : computedType;
-                if (!(type.flags & TypeFlags.Union) || !isAccessExpression(expr)) {
-                    return false;
-                }
-                const name = getAccessedPropertyName(expr);
-                if (name === undefined) {
-                    return false;
-                }
-                return isMatchingReference(reference, expr.expression) && isDiscriminantProperty(type, name);
+                return type.flags & TypeFlags.Union && (access = getPropertyAccess(expr)) && (name = getAccessedPropertyName(access)) &&
+                    isMatchingReference(reference, isAccessExpression(access) ? access.expression : access.parent.parent.initializer!) &&
+                    isDiscriminantProperty(type, name) ?
+                    access : undefined;
             }
 
-            function narrowTypeByDiscriminant(type: Type, access: AccessExpression, narrowType: (t: Type) => Type): Type {
+            function narrowTypeByDiscriminant(type: Type, access: AccessExpression | BindingElement, narrowType: (t: Type) => Type): Type {
                 const propName = getAccessedPropertyName(access);
                 if (propName === undefined) {
                     return type;
@@ -23432,7 +23501,7 @@ namespace ts {
                 });
             }
 
-            function narrowTypeByDiscriminantProperty(type: Type, access: AccessExpression, operator: SyntaxKind, value: Expression, assumeTrue: boolean) {
+            function narrowTypeByDiscriminantProperty(type: Type, access: AccessExpression | BindingElement, operator: SyntaxKind, value: Expression, assumeTrue: boolean) {
                 if ((operator === SyntaxKind.EqualsEqualsEqualsToken || operator === SyntaxKind.ExclamationEqualsEqualsToken) && type.flags & TypeFlags.Union) {
                     const keyPropertyName = getKeyPropertyName(type as UnionType);
                     if (keyPropertyName && keyPropertyName === getAccessedPropertyName(access)) {
@@ -23447,7 +23516,7 @@ namespace ts {
                 return narrowTypeByDiscriminant(type, access, t => narrowTypeByEquality(t, operator, value, assumeTrue));
             }
 
-            function narrowTypeBySwitchOnDiscriminantProperty(type: Type, access: AccessExpression, switchStatement: SwitchStatement, clauseStart: number, clauseEnd: number) {
+            function narrowTypeBySwitchOnDiscriminantProperty(type: Type, access: AccessExpression | BindingElement, switchStatement: SwitchStatement, clauseStart: number, clauseEnd: number) {
                 if (clauseStart < clauseEnd && type.flags & TypeFlags.Union && getKeyPropertyName(type as UnionType) === getAccessedPropertyName(access)) {
                     const clauseTypes = getSwitchClauseTypes(switchStatement).slice(clauseStart, clauseEnd);
                     const candidate = getUnionType(map(clauseTypes, t => getConstituentTypeForKeyType(type as UnionType, t) || unknownType));
@@ -23465,8 +23534,9 @@ namespace ts {
                 if (strictNullChecks && assumeTrue && optionalChainContainsReference(expr, reference)) {
                     type = getTypeWithFacts(type, TypeFacts.NEUndefinedOrNull);
                 }
-                if (isMatchingReferenceDiscriminant(expr, type)) {
-                    return narrowTypeByDiscriminant(type, expr as AccessExpression, t => getTypeWithFacts(t, assumeTrue ? TypeFacts.Truthy : TypeFacts.Falsy));
+                const access = getDiscriminantPropertyAccess(expr, type);
+                if (access) {
+                    return narrowTypeByDiscriminant(type, access, t => getTypeWithFacts(t, assumeTrue ? TypeFacts.Truthy : TypeFacts.Falsy));
                 }
                 return type;
             }
@@ -23524,11 +23594,13 @@ namespace ts {
                                 type = narrowTypeByOptionalChainContainment(type, operator, left, assumeTrue);
                             }
                         }
-                        if (isMatchingReferenceDiscriminant(left, type)) {
-                            return narrowTypeByDiscriminantProperty(type, left as AccessExpression, operator, right, assumeTrue);
+                        const leftAccess = getDiscriminantPropertyAccess(left, type);
+                        if (leftAccess) {
+                            return narrowTypeByDiscriminantProperty(type, leftAccess, operator, right, assumeTrue);
                         }
-                        if (isMatchingReferenceDiscriminant(right, type)) {
-                            return narrowTypeByDiscriminantProperty(type, right as AccessExpression, operator, left, assumeTrue);
+                        const rightAccess = getDiscriminantPropertyAccess(right, type);
+                        if (rightAccess) {
+                            return narrowTypeByDiscriminantProperty(type, rightAccess, operator, left, assumeTrue);
                         }
                         if (isMatchingConstructorReference(left)) {
                             return narrowTypeByConstructor(type, operator, right, assumeTrue);
@@ -23553,6 +23625,17 @@ namespace ts {
                         break;
                     case SyntaxKind.CommaToken:
                         return narrowType(type, expr.right, assumeTrue);
+                    // Ordinarily we won't see && and || expressions in control flow analysis because the Binder breaks those
+                    // expressions down to individual conditional control flows. However, we may encounter them when analyzing
+                    // aliased conditional expressions.
+                    case SyntaxKind.AmpersandAmpersandToken:
+                        return assumeTrue ?
+                            narrowType(narrowType(type, expr.left, /*assumeTrue*/ true), expr.right, /*assumeTrue*/ true) :
+                            getUnionType([narrowType(type, expr.left, /*assumeTrue*/ false), narrowType(type, expr.right, /*assumeTrue*/ false)]);
+                    case SyntaxKind.BarBarToken:
+                        return assumeTrue ?
+                            getUnionType([narrowType(type, expr.left, /*assumeTrue*/ true), narrowType(type, expr.right, /*assumeTrue*/ true)]) :
+                            narrowType(narrowType(type, expr.left, /*assumeTrue*/ false), expr.right, /*assumeTrue*/ false);
                 }
                 return type;
             }
@@ -23959,8 +24042,9 @@ namespace ts {
                             !(getTypeFacts(predicate.type) & TypeFacts.EQUndefined)) {
                             type = getTypeWithFacts(type, TypeFacts.NEUndefinedOrNull);
                         }
-                        if (isMatchingReferenceDiscriminant(predicateArgument, type)) {
-                            return narrowTypeByDiscriminant(type, predicateArgument as AccessExpression, t => getNarrowedType(t, predicate.type!, assumeTrue, isTypeSubtypeOf));
+                        const access = getDiscriminantPropertyAccess(predicateArgument, type);
+                        if (access) {
+                            return narrowTypeByDiscriminant(type, access, t => getNarrowedType(t, predicate.type!, assumeTrue, isTypeSubtypeOf));
                         }
                     }
                 }
@@ -23977,6 +24061,21 @@ namespace ts {
                 }
                 switch (expr.kind) {
                     case SyntaxKind.Identifier:
+                        // When narrowing a reference to a const variable, non-assigned parameter, or readonly property, we inline
+                        // up to five levels of aliased conditional expressions that are themselves declared as const variables.
+                        if (isConstant && !isMatchingReference(reference, expr) && inlineLevel < 5) {
+                            const symbol = getResolvedSymbol(expr as Identifier);
+                            if (isConstVariable(symbol)) {
+                                const declaration = symbol.valueDeclaration;
+                                if (declaration && isVariableDeclaration(declaration) && !declaration.type && declaration.initializer) {
+                                    inlineLevel++;
+                                    const result = narrowType(type, declaration.initializer, assumeTrue);
+                                    inlineLevel--;
+                                    return result;
+                                }
+                            }
+                        }
+                        // falls through
                     case SyntaxKind.ThisKeyword:
                     case SyntaxKind.SuperKeyword:
                     case SyntaxKind.PropertyAccessExpression:
@@ -24002,8 +24101,9 @@ namespace ts {
                 if (isMatchingReference(reference, expr)) {
                     return getTypeWithFacts(type, assumePresent ? TypeFacts.NEUndefinedOrNull : TypeFacts.EQUndefinedOrNull);
                 }
-                if (isMatchingReferenceDiscriminant(expr, type)) {
-                    return narrowTypeByDiscriminant(type, expr as AccessExpression, t => getTypeWithFacts(t, assumePresent ? TypeFacts.NEUndefinedOrNull : TypeFacts.EQUndefinedOrNull));
+                const access = getDiscriminantPropertyAccess(expr, type);
+                if (access) {
+                    return narrowTypeByDiscriminant(type, access, t => getTypeWithFacts(t, assumePresent ? TypeFacts.NEUndefinedOrNull : TypeFacts.EQUndefinedOrNull));
                 }
                 return type;
             }
@@ -24081,7 +24181,7 @@ namespace ts {
         }
 
         function isConstVariable(symbol: Symbol) {
-            return symbol.flags & SymbolFlags.Variable && (getDeclarationNodeFlagsFromSymbol(symbol) & NodeFlags.Const) !== 0 && getTypeOfSymbol(symbol) !== autoArrayType;
+            return symbol.flags & SymbolFlags.Variable && (getDeclarationNodeFlagsFromSymbol(symbol) & NodeFlags.Const) !== 0;
         }
 
         /** remove undefined from the annotated type of a parameter when there is an initializer (that doesn't include undefined) */
@@ -24185,7 +24285,7 @@ namespace ts {
             // To avoid that we will give an error to users if they use arguments objects in arrow function so that they
             // can explicitly bound arguments objects
             if (symbol === argumentsSymbol) {
-                if (isInPropertyInitializer(node)) {
+                if (isInPropertyInitializerOrClassStaticBlock(node)) {
                     error(node, Diagnostics.arguments_cannot_be_referenced_in_property_initializers);
                     return errorType;
                 }
@@ -24241,7 +24341,7 @@ namespace ts {
                     let container = getThisContainer(node, /*includeArrowFunctions*/ false);
                     while (container.kind !== SyntaxKind.SourceFile) {
                         if (container.parent === declaration) {
-                            if (container.kind === SyntaxKind.PropertyDeclaration && hasSyntacticModifier(container, ModifierFlags.Static)) {
+                            if (container.kind === SyntaxKind.PropertyDeclaration && isStatic(container)) {
                                 getNodeLinks(declaration).flags |= NodeCheckFlags.ClassWithConstructorReference;
                                 getNodeLinks(node).flags |= NodeCheckFlags.ConstructorReferenceInClass;
                             }
@@ -24313,12 +24413,12 @@ namespace ts {
             const isOuterVariable = flowContainer !== declarationContainer;
             const isSpreadDestructuringAssignmentTarget = node.parent && node.parent.parent && isSpreadAssignment(node.parent) && isDestructuringAssignmentTarget(node.parent.parent);
             const isModuleExports = symbol.flags & SymbolFlags.ModuleExports;
+            const isConstant = isConstVariable(localOrExportSymbol) && getTypeOfSymbol(localOrExportSymbol) !== autoArrayType || isParameter && !isParameterAssigned(localOrExportSymbol);
             // When the control flow originates in a function expression or arrow function and we are referencing
             // a const variable or parameter from an outer function, we extend the origin of the control flow
             // analysis to include the immediately enclosing function.
-            while (flowContainer !== declarationContainer && (flowContainer.kind === SyntaxKind.FunctionExpression ||
-                flowContainer.kind === SyntaxKind.ArrowFunction || isObjectLiteralOrClassExpressionMethod(flowContainer)) &&
-                (isConstVariable(localOrExportSymbol) || isParameter && !isParameterAssigned(localOrExportSymbol))) {
+            while (isConstant && flowContainer !== declarationContainer && (flowContainer.kind === SyntaxKind.FunctionExpression ||
+                flowContainer.kind === SyntaxKind.ArrowFunction || isObjectLiteralOrClassExpressionMethod(flowContainer))) {
                 flowContainer = getControlFlowContainer(flowContainer);
             }
             // We only look for uninitialized variables in strict null checking mode, and only when we can analyze
@@ -24333,7 +24433,7 @@ namespace ts {
             const initialType = assumeInitialized ? (isParameter ? removeOptionalityFromDeclaredType(type, declaration as VariableLikeDeclaration) : type) :
                 type === autoType || type === autoArrayType ? undefinedType :
                 getOptionalType(type);
-            const flowType = getFlowTypeOfReference(node, type, initialType, flowContainer, !assumeInitialized);
+            const flowType = getFlowTypeOfReference(node, type, initialType, isConstant, flowContainer);
             // A variable is considered uninitialized when it is possible to analyze the entire control flow graph
             // from declaration to use, and when the variable's declared type doesn't include undefined but the
             // control flow based type does include undefined.
@@ -24504,6 +24604,13 @@ namespace ts {
             }
         }
 
+        function checkThisInStaticClassFieldInitializerInDecoratedClass(thisExpression: Node, container: Node) {
+            if (isPropertyDeclaration(container) && hasStaticModifier(container) &&
+                container.initializer && textRangeContainsPositionInclusive(container.initializer, thisExpression.pos) && length(container.parent.decorators)) {
+                    error(thisExpression, Diagnostics.Cannot_use_this_in_a_static_property_initializer_of_a_decorated_class);
+            }
+        }
+
         function checkThisExpression(node: Node): Type {
             const isNodeInTypeQuery = isInTypeQuery(node);
             // Stop at the first arrow function so that we can
@@ -24521,6 +24628,7 @@ namespace ts {
                 capturedByArrowFunction = true;
             }
 
+            checkThisInStaticClassFieldInitializerInDecoratedClass(node, container);
             switch (container.kind) {
                 case SyntaxKind.ModuleDeclaration:
                     error(node, Diagnostics.this_cannot_be_referenced_in_a_module_or_namespace_body);
@@ -24533,13 +24641,6 @@ namespace ts {
                 case SyntaxKind.Constructor:
                     if (isInConstructorArgumentInitializer(node, container)) {
                         error(node, Diagnostics.this_cannot_be_referenced_in_constructor_arguments);
-                        // do not return here so in case if lexical this is captured - it will be reflected in flags on NodeLinks
-                    }
-                    break;
-                case SyntaxKind.PropertyDeclaration:
-                case SyntaxKind.PropertySignature:
-                    if (hasSyntacticModifier(container, ModifierFlags.Static) && !(compilerOptions.target === ScriptTarget.ESNext && useDefineForClassFields)) {
-                        error(node, Diagnostics.this_cannot_be_referenced_in_a_static_property_initializer);
                         // do not return here so in case if lexical this is captured - it will be reflected in flags on NodeLinks
                     }
                     break;
@@ -24601,7 +24702,7 @@ namespace ts {
 
             if (isClassLike(container.parent)) {
                 const symbol = getSymbolOfNode(container.parent);
-                const type = hasSyntacticModifier(container, ModifierFlags.Static) ? getTypeOfSymbol(symbol) : (getDeclaredTypeOfSymbol(symbol) as InterfaceType).thisType!;
+                const type = isStatic(container) ? getTypeOfSymbol(symbol) : (getDeclaredTypeOfSymbol(symbol) as InterfaceType).thisType!;
                 return getFlowTypeOfReference(node, type);
             }
 
@@ -24631,7 +24732,7 @@ namespace ts {
             }
             if (isClassLike(container.parent)) {
                 const symbol = getSymbolOfNode(container.parent);
-                return hasSyntacticModifier(container, ModifierFlags.Static) ? getTypeOfSymbol(symbol) : (getDeclaredTypeOfSymbol(symbol) as InterfaceType).thisType!;
+                return isStatic(container) ? getTypeOfSymbol(symbol) : (getDeclaredTypeOfSymbol(symbol) as InterfaceType).thisType!;
             }
         }
 
@@ -24752,7 +24853,7 @@ namespace ts {
                 checkThisBeforeSuper(node, container, Diagnostics.super_must_be_called_before_accessing_a_property_of_super_in_the_constructor_of_a_derived_class);
             }
 
-            if (hasSyntacticModifier(container, ModifierFlags.Static) || isCallExpression) {
+            if (isStatic(container) || isCallExpression) {
                 nodeCheckFlag = NodeCheckFlags.SuperStatic;
             }
             else {
@@ -24888,11 +24989,13 @@ namespace ts {
 
                     // topmost container must be something that is directly nested in the class declaration\object literal expression
                     if (isClassLike(container.parent) || container.parent.kind === SyntaxKind.ObjectLiteralExpression) {
-                        if (hasSyntacticModifier(container, ModifierFlags.Static)) {
+                        if (isStatic(container)) {
                             return container.kind === SyntaxKind.MethodDeclaration ||
                                 container.kind === SyntaxKind.MethodSignature ||
                                 container.kind === SyntaxKind.GetAccessor ||
-                                container.kind === SyntaxKind.SetAccessor;
+                                container.kind === SyntaxKind.SetAccessor ||
+                                container.kind === SyntaxKind.PropertyDeclaration ||
+                                container.kind === SyntaxKind.ClassStaticBlockDeclaration;
                         }
                         else {
                             return container.kind === SyntaxKind.MethodDeclaration ||
@@ -25031,7 +25134,7 @@ namespace ts {
                 case SyntaxKind.BindingElement:
                     return getContextualTypeForBindingElement(declaration);
                 case SyntaxKind.PropertyDeclaration:
-                    if (hasSyntacticModifier(declaration, ModifierFlags.Static)) {
+                    if (isStatic(declaration)) {
                         return getContextualTypeForStaticPropertyDeclaration(declaration);
                     }
                 // By default, do nothing and return undefined - only the above cases have context implied by a parent
@@ -27534,10 +27637,12 @@ namespace ts {
             let assumeUninitialized = false;
             if (strictNullChecks && strictPropertyInitialization && isAccessExpression(node) && node.expression.kind === SyntaxKind.ThisKeyword) {
                 const declaration = prop && prop.valueDeclaration;
-                if (declaration && isInstancePropertyWithoutInitializer(declaration)) {
-                    const flowContainer = getControlFlowContainer(node);
-                    if (flowContainer.kind === SyntaxKind.Constructor && flowContainer.parent === declaration.parent && !(declaration.flags & NodeFlags.Ambient)) {
-                        assumeUninitialized = true;
+                if (declaration && isPropertyWithoutInitializer(declaration)) {
+                    if (!isStatic(declaration)) {
+                        const flowContainer = getControlFlowContainer(node);
+                        if (flowContainer.kind === SyntaxKind.Constructor && flowContainer.parent === declaration.parent && !(declaration.flags & NodeFlags.Ambient)) {
+                            assumeUninitialized = true;
+                        }
                     }
                 }
             }
@@ -27547,7 +27652,7 @@ namespace ts {
                 getControlFlowContainer(node) === getControlFlowContainer(prop.valueDeclaration)) {
                 assumeUninitialized = true;
             }
-            const flowType = getFlowTypeOfReference(node, propType, assumeUninitialized ? getOptionalType(propType) : propType);
+            const flowType = getFlowTypeOfReference(node, propType, assumeUninitialized ? getOptionalType(propType) : propType, prop && isReadonlySymbol(prop));
             if (assumeUninitialized && !(getFalsyFlags(propType) & TypeFlags.Undefined) && getFalsyFlags(flowType) & TypeFlags.Undefined) {
                 error(errorNode, Diagnostics.Property_0_is_used_before_being_assigned, symbolToString(prop!)); // TODO: GH#18217
                 // Return the declared type to reduce follow-on errors
@@ -27564,7 +27669,7 @@ namespace ts {
 
             let diagnosticMessage;
             const declarationName = idText(right);
-            if (isInPropertyInitializer(node)
+            if (isInPropertyInitializerOrClassStaticBlock(node)
                 && !isOptionalPropertyDeclaration(valueDeclaration)
                 && !(isAccessExpression(node) && isAccessExpression(node.expression))
                 && !isBlockScopedNameDeclaredBeforeUse(valueDeclaration, right)
@@ -27585,7 +27690,7 @@ namespace ts {
             }
         }
 
-        function isInPropertyInitializer(node: Node): boolean {
+        function isInPropertyInitializerOrClassStaticBlock(node: Node): boolean {
             return !!findAncestor(node, node => {
                 switch (node.kind) {
                     case SyntaxKind.PropertyDeclaration:
@@ -27605,6 +27710,8 @@ namespace ts {
                     case SyntaxKind.ExpressionWithTypeArguments:
                     case SyntaxKind.HeritageClause:
                         return false;
+                    case SyntaxKind.ExpressionStatement:
+                        return isBlock(node.parent) && isClassStaticBlockDeclaration(node.parent.parent) ? true : "quit";
                     default:
                         return isExpressionNode(node) ? false : "quit";
                 }
@@ -27701,7 +27808,7 @@ namespace ts {
 
         function typeHasStaticProperty(propName: __String, containingType: Type): boolean {
             const prop = containingType.symbol && getPropertyOfType(getTypeOfSymbol(containingType.symbol), propName);
-            return prop !== undefined && !!prop.valueDeclaration && hasSyntacticModifier(prop.valueDeclaration, ModifierFlags.Static);
+            return prop !== undefined && !!prop.valueDeclaration && isStatic(prop.valueDeclaration);
         }
 
         function getSuggestedLibForNonExistentName(name: __String | Identifier) {
@@ -30352,6 +30459,39 @@ namespace ts {
             return restParameter.escapedName;
         }
 
+        function getParameterIdentifierNameAtPosition(signature: Signature, pos: number): [parameterName: __String, isRestParameter: boolean] | undefined {
+            const paramCount = signature.parameters.length - (signatureHasRestParameter(signature) ? 1 : 0);
+            if (pos < paramCount) {
+                const param = signature.parameters[pos];
+                return isParameterDeclarationWithIdentifierName(param) ? [param.escapedName, false] : undefined;
+            }
+
+            const restParameter = signature.parameters[paramCount] || unknownSymbol;
+            if (!isParameterDeclarationWithIdentifierName(restParameter)) {
+                return undefined;
+            }
+
+            const restType = getTypeOfSymbol(restParameter);
+            if (isTupleType(restType)) {
+                const associatedNames = ((restType as TypeReference).target as TupleType).labeledElementDeclarations;
+                const index = pos - paramCount;
+                const associatedName = associatedNames?.[index];
+                const isRestTupleElement = !!associatedName?.dotDotDotToken;
+                return associatedName ? [
+                    getTupleElementLabel(associatedName),
+                    isRestTupleElement
+                ] : undefined;
+            }
+
+            if (pos === paramCount) {
+                return [restParameter.escapedName, true];
+            }
+            return undefined;
+        }
+
+        function isParameterDeclarationWithIdentifierName(symbol: Symbol) {
+            return symbol.valueDeclaration && isParameter(symbol.valueDeclaration) && isIdentifier(symbol.valueDeclaration.name);
+        }
         function isValidDeclarationForTupleLabel(d: Declaration): d is NamedTupleMember | (ParameterDeclaration & { name: Identifier }) {
             return d.kind === SyntaxKind.NamedTupleMember || (isParameter(d) && d.name && isIdentifier(d.name));
         }
@@ -31269,7 +31409,11 @@ namespace ts {
         function checkAwaitExpression(node: AwaitExpression): Type {
             // Grammar checking
             if (produceDiagnostics) {
-                if (!(node.flags & NodeFlags.AwaitContext)) {
+                const container = getContainingFunctionOrClassStaticBlock(node);
+                if (container && isClassStaticBlockDeclaration(container)) {
+                    error(node, Diagnostics.Await_expression_cannot_be_used_inside_a_class_static_block);
+                }
+                else if (!(node.flags & NodeFlags.AwaitContext)) {
                     if (isInTopLevelContext(node)) {
                         const sourceFile = getSourceFileOfNode(node);
                         if (!hasParseDiagnostics(sourceFile)) {
@@ -31294,9 +31438,8 @@ namespace ts {
                         if (!hasParseDiagnostics(sourceFile)) {
                             const span = getSpanOfTokenAtPosition(sourceFile, node.pos);
                             const diagnostic = createFileDiagnostic(sourceFile, span.start, span.length, Diagnostics.await_expressions_are_only_allowed_within_async_functions_and_at_the_top_levels_of_modules);
-                            const func = getContainingFunction(node);
-                            if (func && func.kind !== SyntaxKind.Constructor && (getFunctionFlags(func) & FunctionFlags.Async) === 0) {
-                                const relatedInfo = createDiagnosticForNode(func, Diagnostics.Did_you_mean_to_mark_this_function_as_async);
+                            if (container && container.kind !== SyntaxKind.Constructor && (getFunctionFlags(container) & FunctionFlags.Async) === 0) {
+                                const relatedInfo = createDiagnosticForNode(container, Diagnostics.Did_you_mean_to_mark_this_function_as_async);
                                 addRelatedInfo(diagnostic, relatedInfo);
                             }
                             diagnostics.add(diagnostic);
@@ -33229,16 +33372,16 @@ namespace ts {
                     }
                 }
                 else {
-                    const isStatic = hasSyntacticModifier(member, ModifierFlags.Static);
+                    const isStaticMember = isStatic(member);
                     const name = member.name;
                     if (!name) {
                         continue;
                     }
                     const isPrivate = isPrivateIdentifier(name);
-                    const privateStaticFlags = isPrivate && isStatic ? DeclarationMeaning.PrivateStatic : 0;
+                    const privateStaticFlags = isPrivate && isStaticMember ? DeclarationMeaning.PrivateStatic : 0;
                     const names =
                         isPrivate ? privateIdentifiers :
-                        isStatic ? staticNames :
+                        isStaticMember ? staticNames :
                         instanceNames;
 
                     const memberName = name && getPropertyNameForPropertyNameNode(name);
@@ -33308,8 +33451,8 @@ namespace ts {
         function checkClassForStaticPropertyNameConflicts(node: ClassLikeDeclaration) {
             for (const member of node.members) {
                 const memberNameNode = member.name;
-                const isStatic = hasSyntacticModifier(member, ModifierFlags.Static);
-                if (isStatic && memberNameNode) {
+                const isStaticMember = isStatic(member);
+                if (isStaticMember && memberNameNode) {
                     const memberName = getPropertyNameForPropertyNameNode(memberNameNode);
                     switch (memberName) {
                         case "name":
@@ -33455,6 +33598,12 @@ namespace ts {
             }
         }
 
+        function checkClassStaticBlockDeclaration(node: ClassStaticBlockDeclaration) {
+            checkGrammarDecoratorsAndModifiers(node);
+
+            forEachChild(node, checkSourceElement);
+        }
+
         function checkConstructorDeclaration(node: ConstructorDeclaration) {
             // Grammar check on signature of constructor and modifier of the constructor is done in checkSignatureDeclaration function.
             checkSignatureDeclaration(node);
@@ -33485,7 +33634,7 @@ namespace ts {
                     return true;
                 }
                 return n.kind === SyntaxKind.PropertyDeclaration &&
-                    !hasSyntacticModifier(n, ModifierFlags.Static) &&
+                    !isStatic(n) &&
                     !!(n as PropertyDeclaration).initializer;
             }
 
@@ -33970,13 +34119,13 @@ namespace ts {
                         )) {
                             const reportError =
                                 (node.kind === SyntaxKind.MethodDeclaration || node.kind === SyntaxKind.MethodSignature) &&
-                                hasSyntacticModifier(node, ModifierFlags.Static) !== hasSyntacticModifier(subsequentNode, ModifierFlags.Static);
+                                isStatic(node) !== isStatic(subsequentNode);
                             // we can get here in two cases
                             // 1. mixed static and instance class members
                             // 2. something with the same name was defined before the set of overloads that prevents them from merging
                             // here we'll report error only for the first case since for second we should already report error in binder
                             if (reportError) {
-                                const diagnostic = hasSyntacticModifier(node, ModifierFlags.Static) ? Diagnostics.Function_overload_must_be_static : Diagnostics.Function_overload_must_not_be_static;
+                                const diagnostic = isStatic(node) ? Diagnostics.Function_overload_must_be_static : Diagnostics.Function_overload_must_not_be_static;
                                 error(errorNode, diagnostic);
                             }
                             return;
@@ -35062,10 +35211,11 @@ namespace ts {
                         break;
                     case SyntaxKind.IndexSignature:
                     case SyntaxKind.SemicolonClassElement:
+                    case SyntaxKind.ClassStaticBlockDeclaration:
                         // Can't be private
                         break;
                     default:
-                        Debug.fail();
+                        Debug.fail("Unexpected class member");
                 }
             }
         }
@@ -35497,6 +35647,7 @@ namespace ts {
             if (!node.name) {
                 return;
             }
+
             // For a computed property, just check the initializer and exit
             // Do not use hasDynamicName here, because that returns false for well known symbols.
             // We want to perform checkComputedPropertyName for all computed properties, including
@@ -35873,11 +36024,17 @@ namespace ts {
         function checkForOfStatement(node: ForOfStatement): void {
             checkGrammarForInOrForOfStatement(node);
 
+            const container = getContainingFunctionOrClassStaticBlock(node);
             if (node.awaitModifier) {
-                const functionFlags = getFunctionFlags(getContainingFunction(node));
-                if ((functionFlags & (FunctionFlags.Invalid | FunctionFlags.Async)) === FunctionFlags.Async && languageVersion < ScriptTarget.ESNext) {
-                    // for..await..of in an async function or async generator function prior to ESNext requires the __asyncValues helper
-                    checkExternalEmitHelpers(node, ExternalEmitHelpers.ForAwaitOfIncludes);
+                if (container && isClassStaticBlockDeclaration(container)) {
+                    grammarErrorOnNode(node.awaitModifier, Diagnostics.For_await_loops_cannot_be_used_inside_a_class_static_block);
+                }
+                else {
+                    const functionFlags = getFunctionFlags(container);
+                    if ((functionFlags & (FunctionFlags.Invalid | FunctionFlags.Async)) === FunctionFlags.Async && languageVersion < ScriptTarget.ESNext) {
+                        // for..await..of in an async function or async generator function prior to ESNext requires the __asyncValues helper
+                        checkExternalEmitHelpers(node, ExternalEmitHelpers.ForAwaitOfIncludes);
+                    }
                 }
             }
             else if (compilerOptions.downlevelIteration && languageVersion < ScriptTarget.ES2015) {
@@ -36757,28 +36914,33 @@ namespace ts {
                 return;
             }
 
-            const func = getContainingFunction(node);
-            if (!func) {
+            const container = getContainingFunctionOrClassStaticBlock(node);
+            if(container && isClassStaticBlockDeclaration(container)) {
+                grammarErrorOnFirstToken(node, Diagnostics.A_return_statement_cannot_be_used_inside_a_class_static_block);
+                return;
+            }
+
+            if (!container) {
                 grammarErrorOnFirstToken(node, Diagnostics.A_return_statement_can_only_be_used_within_a_function_body);
                 return;
             }
 
-            const signature = getSignatureFromDeclaration(func);
+            const signature = getSignatureFromDeclaration(container);
             const returnType = getReturnTypeOfSignature(signature);
-            const functionFlags = getFunctionFlags(func);
+            const functionFlags = getFunctionFlags(container);
             if (strictNullChecks || node.expression || returnType.flags & TypeFlags.Never) {
                 const exprType = node.expression ? checkExpressionCached(node.expression) : undefinedType;
-                if (func.kind === SyntaxKind.SetAccessor) {
+                if (container.kind === SyntaxKind.SetAccessor) {
                     if (node.expression) {
                         error(node, Diagnostics.Setters_cannot_return_a_value);
                     }
                 }
-                else if (func.kind === SyntaxKind.Constructor) {
+                else if (container.kind === SyntaxKind.Constructor) {
                     if (node.expression && !checkTypeAssignableToAndOptionallyElaborate(exprType, returnType, node, node.expression)) {
                         error(node, Diagnostics.Return_type_of_constructor_signature_must_be_assignable_to_the_instance_type_of_the_class);
                     }
                 }
-                else if (getReturnTypeFromAnnotation(func)) {
+                else if (getReturnTypeFromAnnotation(container)) {
                     const unwrappedReturnType = unwrapReturnType(returnType, functionFlags) ?? returnType;
                     const unwrappedExprType = functionFlags & FunctionFlags.Async
                         ? checkAwaitedType(exprType, node, Diagnostics.The_return_type_of_an_async_function_must_either_be_a_valid_promise_or_must_not_contain_a_callable_then_member)
@@ -36791,7 +36953,7 @@ namespace ts {
                     }
                 }
             }
-            else if (func.kind !== SyntaxKind.Constructor && compilerOptions.noImplicitReturns && !isUnwrappedReturnTypeVoidOrAny(func, returnType)) {
+            else if (container.kind !== SyntaxKind.Constructor && compilerOptions.noImplicitReturns && !isUnwrappedReturnTypeVoidOrAny(container, returnType)) {
                 // The function has a return type, but the return statement doesn't have an expression.
                 error(node, Diagnostics.Not_all_code_paths_return_a_value);
             }
@@ -36935,13 +37097,13 @@ namespace ts {
             }
         }
 
-        function checkIndexConstraints(type: Type, isStatic?: boolean) {
+        function checkIndexConstraints(type: Type, isStaticIndex?: boolean) {
             const indexInfos = getIndexInfosOfType(type);
             if (indexInfos.length === 0) {
                 return;
             }
             for (const prop of getPropertiesOfObjectType(type)) {
-                if (!(isStatic && prop.flags & SymbolFlags.Prototype)) {
+                if (!(isStaticIndex && prop.flags & SymbolFlags.Prototype)) {
                     checkIndexConstraintForProperty(type, prop, getLiteralTypeFromProperty(prop, TypeFlags.StringOrNumberLiteralOrUnique, /*includeNonPublic*/ true), getNonMissingTypeOfSymbol(prop));
                 }
             }
@@ -36950,7 +37112,7 @@ namespace ts {
                 for (const member of typeDeclaration.members) {
                     // Only process instance properties with computed names here. Static properties cannot be in conflict with indexers,
                     // and properties with literal names were already checked.
-                    if (!hasSyntacticModifier(member, ModifierFlags.Static) && !hasBindableName(member)) {
+                    if (!isStatic(member) && !hasBindableName(member)) {
                         const symbol = getSymbolOfNode(member);
                         checkIndexConstraintForProperty(type, symbol, getTypeOfExpression((member as DynamicNamedDeclaration).name.expression), getNonMissingTypeOfSymbol(symbol));
                     }
@@ -37294,7 +37456,7 @@ namespace ts {
 
             if (produceDiagnostics) {
                 checkIndexConstraints(type);
-                checkIndexConstraints(staticType, /*isStatic*/ true);
+                checkIndexConstraints(staticType, /*isStaticIndex*/ true);
                 checkTypeForDuplicateIndexSignatures(node);
                 checkPropertyInitialization(node);
             }
@@ -37324,7 +37486,7 @@ namespace ts {
 
             function checkClassMember(member: ClassElement | ParameterPropertyDeclaration, memberIsParameterProperty?: boolean) {
                 const hasOverride = hasOverrideModifier(member);
-                const hasStatic = hasStaticModifier(member);
+                const hasStatic = isStatic(member);
                 if (baseWithThis && (hasOverride || compilerOptions.noImplicitOverride)) {
                     const declaredProp = member.name && getSymbolAtLocation(member.name) || getSymbolAtLocation(member);
                     if (!declaredProp) {
@@ -37371,7 +37533,7 @@ namespace ts {
             // iterate over all implemented properties and issue errors on each one which isn't compatible, rather than the class as a whole, if possible
             let issuedMemberError = false;
             for (const member of node.members) {
-                if (hasStaticModifier(member)) {
+                if (isStatic(member)) {
                     continue;
                 }
                 const declaredProp = member.name && getSymbolAtLocation(member.name) || getSymbolAtLocation(member);
@@ -37627,7 +37789,7 @@ namespace ts {
                 if (getEffectiveModifierFlags(member) & ModifierFlags.Ambient) {
                     continue;
                 }
-                if (isInstancePropertyWithoutInitializer(member)) {
+                if (!isStatic(member) && isPropertyWithoutInitializer(member)) {
                     const propName = (member as PropertyDeclaration).name;
                     if (isIdentifier(propName) || isPrivateIdentifier(propName)) {
                         const type = getTypeOfSymbol(getSymbolOfNode(member));
@@ -37641,11 +37803,28 @@ namespace ts {
             }
         }
 
-        function isInstancePropertyWithoutInitializer(node: Node) {
+        function isPropertyWithoutInitializer(node: Node) {
             return node.kind === SyntaxKind.PropertyDeclaration &&
-                !hasSyntacticModifier(node, ModifierFlags.Static | ModifierFlags.Abstract) &&
+                !hasAbstractModifier(node) &&
                 !(node as PropertyDeclaration).exclamationToken &&
                 !(node as PropertyDeclaration).initializer;
+        }
+
+        function isPropertyInitializedInStaticBlocks(propName: Identifier | PrivateIdentifier, propType: Type, staticBlocks: readonly ClassStaticBlockDeclaration[], startPos: number, endPos: number) {
+            for (const staticBlock of staticBlocks) {
+                // static block must be within the provided range as they are evaluated in document order (unlike constructors)
+                if (staticBlock.pos >= startPos && staticBlock.pos <= endPos) {
+                    const reference = factory.createPropertyAccessExpression(factory.createThis(), propName);
+                    setParent(reference.expression, reference);
+                    setParent(reference, staticBlock);
+                    reference.flowNode = staticBlock.returnFlowNode;
+                    const flowType = getFlowTypeOfReference(reference, propType, getOptionalType(propType));
+                    if (!(getFalsyFlags(flowType) & TypeFlags.Undefined)) {
+                        return true;
+                    }
+                }
+            }
+            return false;
         }
 
         function isPropertyInitializedInConstructor(propName: Identifier | PrivateIdentifier, propType: Type, constructor: ConstructorDeclaration) {
@@ -37991,7 +38170,7 @@ namespace ts {
                     error(node.name, Diagnostics.Augmentations_for_the_global_scope_should_have_declare_modifier_unless_they_appear_in_already_ambient_context);
                 }
 
-                const isAmbientExternalModule = isAmbientModule(node);
+                const isAmbientExternalModule: boolean = isAmbientModule(node);
                 const contextErrorMessage = isAmbientExternalModule
                     ? Diagnostics.An_ambient_module_declaration_is_only_allowed_at_the_top_level_in_a_file
                     : Diagnostics.A_namespace_declaration_is_only_allowed_in_a_namespace_or_module;
@@ -38621,6 +38800,8 @@ namespace ts {
                 case SyntaxKind.MethodDeclaration:
                 case SyntaxKind.MethodSignature:
                     return checkMethodDeclaration(node as MethodDeclaration | MethodSignature);
+                case SyntaxKind.ClassStaticBlockDeclaration:
+                    return checkClassStaticBlockDeclaration(node as ClassStaticBlockDeclaration);
                 case SyntaxKind.Constructor:
                     return checkConstructorDeclaration(node as ConstructorDeclaration);
                 case SyntaxKind.GetAccessor:
@@ -39057,7 +39238,7 @@ namespace ts {
             }
 
             const symbols = createSymbolTable();
-            let isStatic = false;
+            let isStaticSymbol = false;
 
             populateSymbols();
 
@@ -39095,7 +39276,7 @@ namespace ts {
                             // add the type parameters into the symbol table
                             // (type parameters of classDeclaration/classExpression and interface are in member property of the symbol.
                             // Note: that the memberFlags come from previous iteration.
-                            if (!isStatic) {
+                            if (!isStaticSymbol) {
                                 copySymbols(getMembersOfSymbol(getSymbolOfNode(location as ClassDeclaration | InterfaceDeclaration)), meaning & SymbolFlags.Type);
                             }
                             break;
@@ -39111,7 +39292,7 @@ namespace ts {
                         copySymbol(argumentsSymbol, meaning);
                     }
 
-                    isStatic = hasSyntacticModifier(location, ModifierFlags.Static);
+                    isStaticSymbol = isStatic(location);
                     location = location.parent;
                 }
 
@@ -39710,7 +39891,7 @@ namespace ts {
          */
         function getParentTypeOfClassElement(node: ClassElement) {
             const classSymbol = getSymbolOfNode(node.parent)!;
-            return hasSyntacticModifier(node, ModifierFlags.Static)
+            return isStatic(node)
                 ? getTypeOfSymbol(classSymbol)
                 : getDeclaredTypeOfSymbol(classSymbol);
         }
@@ -41098,6 +41279,7 @@ namespace ts {
                         case SyntaxKind.InterfaceDeclaration:
                         case SyntaxKind.VariableStatement:
                         case SyntaxKind.TypeAliasDeclaration:
+                        case SyntaxKind.ClassStaticBlockDeclaration:
                             return true;
                         case SyntaxKind.EnumDeclaration:
                             return nodeHasAnyModifiersExcept(node, SyntaxKind.ConstKeyword);
@@ -41753,8 +41935,8 @@ namespace ts {
                         break;
 
                     case SyntaxKind.PropertyDeclaration:
-                        if (!hasSyntacticModifier(parent, ModifierFlags.Static) ||
-                            !hasEffectiveModifier(parent, ModifierFlags.Readonly)) {
+                        if (!isStatic(parent) ||
+                            !hasEffectiveReadonlyModifier(parent)) {
                             return grammarErrorOnNode((parent as PropertyDeclaration).name, Diagnostics.A_property_of_a_class_whose_type_is_a_unique_symbol_type_must_be_both_static_and_readonly);
                         }
                         break;
@@ -41835,7 +42017,7 @@ namespace ts {
         function checkGrammarBreakOrContinueStatement(node: BreakOrContinueStatement): boolean {
             let current: Node = node;
             while (current) {
-                if (isFunctionLike(current)) {
+                if (isFunctionLikeOrClassStaticBlockDeclaration(current)) {
                     return grammarErrorOnNode(node, Diagnostics.Jump_target_cannot_cross_function_boundary);
                 }
 
@@ -42171,7 +42353,7 @@ namespace ts {
             }
 
             if (isPropertyDeclaration(node) && node.exclamationToken && (!isClassLike(node.parent) || !node.type || node.initializer ||
-                node.flags & NodeFlags.Ambient || hasSyntacticModifier(node, ModifierFlags.Static | ModifierFlags.Abstract))) {
+                node.flags & NodeFlags.Ambient || isStatic(node) || hasAbstractModifier(node))) {
                 const message = node.initializer
                     ? Diagnostics.Declarations_with_initializers_cannot_also_have_definite_assignment_assertions
                     : !node.type
