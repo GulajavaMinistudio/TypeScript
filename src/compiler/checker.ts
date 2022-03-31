@@ -172,18 +172,20 @@ namespace ts {
         EnumTagType,
         ResolvedTypeArguments,
         ResolvedBaseTypes,
+        WriteType,
     }
 
     const enum CheckMode {
-        Normal = 0,                        // Normal type checking
-        Contextual = 1 << 0,               // Explicitly assigned contextual type, therefore not cacheable
-        Inferential = 1 << 1,              // Inferential typing
-        SkipContextSensitive = 1 << 2,     // Skip context sensitive function expressions
-        SkipGenericFunctions = 1 << 3,     // Skip single signature generic functions
-        IsForSignatureHelp = 1 << 4,       // Call resolution for purposes of signature help
-        RestBindingElement = 1 << 5,       // Checking a type that is going to be used to determine the type of a rest binding element
-                                           //   e.g. in `const { a, ...rest } = foo`, when checking the type of `foo` to determine the type of `rest`,
-                                           //   we need to preserve generic types instead of substituting them for constraints
+        Normal = 0,                                     // Normal type checking
+        Contextual = 1 << 0,                            // Explicitly assigned contextual type, therefore not cacheable
+        Inferential = 1 << 1,                           // Inferential typing
+        SkipContextSensitive = 1 << 2,                  // Skip context sensitive function expressions
+        SkipGenericFunctions = 1 << 3,                  // Skip single signature generic functions
+        IsForSignatureHelp = 1 << 4,                    // Call resolution for purposes of signature help
+        IsForStringLiteralArgumentCompletions = 1 << 5, // Do not infer from the argument currently being typed
+        RestBindingElement = 1 << 6,                    // Checking a type that is going to be used to determine the type of a rest binding element
+                                                        //   e.g. in `const { a, ...rest } = foo`, when checking the type of `foo` to determine the type of `rest`,
+                                                        //   we need to preserve generic types instead of substituting them for constraints
     }
 
     const enum SignatureCheckMode {
@@ -539,26 +541,10 @@ namespace ts {
                 if (!node) {
                     return undefined;
                 }
-                const containingCall = findAncestor(node, isCallLikeExpression);
-                const containingCallResolvedSignature = containingCall && getNodeLinks(containingCall).resolvedSignature;
-                if (contextFlags! & ContextFlags.Completions && containingCall) {
-                    let toMarkSkip = node as Node;
-                    do {
-                        getNodeLinks(toMarkSkip).skipDirectInference = true;
-                        toMarkSkip = toMarkSkip.parent;
-                    } while (toMarkSkip && toMarkSkip !== containingCall);
-                    getNodeLinks(containingCall).resolvedSignature = undefined;
+                if (contextFlags! & ContextFlags.Completions) {
+                    return runWithInferenceBlockedFromSourceNode(node, () => getContextualType(node, contextFlags));
                 }
-                const result = getContextualType(node, contextFlags);
-                if (contextFlags! & ContextFlags.Completions && containingCall) {
-                    let toMarkSkip = node as Node;
-                    do {
-                        getNodeLinks(toMarkSkip).skipDirectInference = undefined;
-                        toMarkSkip = toMarkSkip.parent;
-                    } while (toMarkSkip && toMarkSkip !== containingCall);
-                    getNodeLinks(containingCall).resolvedSignature = containingCallResolvedSignature;
-                }
-                return result;
+                return getContextualType(node, contextFlags);
             },
             getContextualTypeForObjectLiteralElement: nodeIn => {
                 const node = getParseTreeNode(nodeIn, isObjectLiteralElementLike);
@@ -577,6 +563,8 @@ namespace ts {
             getFullyQualifiedName,
             getResolvedSignature: (node, candidatesOutArray, argumentCount) =>
                 getResolvedSignatureWorker(node, candidatesOutArray, argumentCount, CheckMode.Normal),
+            getResolvedSignatureForStringLiteralCompletions: (call, editingArgument, candidatesOutArray) =>
+                getResolvedSignatureWorker(call, candidatesOutArray, /*argumentCount*/ undefined, CheckMode.IsForStringLiteralArgumentCompletions, editingArgument),
             getResolvedSignatureForSignatureHelp: (node, candidatesOutArray, argumentCount) =>
                 getResolvedSignatureWorker(node, candidatesOutArray, argumentCount, CheckMode.IsForSignatureHelp),
             getExpandedParameters,
@@ -746,10 +734,36 @@ namespace ts {
             getMemberOverrideModifierStatus,
         };
 
-        function getResolvedSignatureWorker(nodeIn: CallLikeExpression, candidatesOutArray: Signature[] | undefined, argumentCount: number | undefined, checkMode: CheckMode): Signature | undefined {
+        function runWithInferenceBlockedFromSourceNode<T>(node: Node | undefined, fn: () => T): T {
+            const containingCall = findAncestor(node, isCallLikeExpression);
+            const containingCallResolvedSignature = containingCall && getNodeLinks(containingCall).resolvedSignature;
+            if (containingCall) {
+                let toMarkSkip = node!;
+                do {
+                    getNodeLinks(toMarkSkip).skipDirectInference = true;
+                    toMarkSkip = toMarkSkip.parent;
+                } while (toMarkSkip && toMarkSkip !== containingCall);
+                getNodeLinks(containingCall).resolvedSignature = undefined;
+            }
+            const result = fn();
+            if (containingCall) {
+                let toMarkSkip = node!;
+                do {
+                    getNodeLinks(toMarkSkip).skipDirectInference = undefined;
+                    toMarkSkip = toMarkSkip.parent;
+                } while (toMarkSkip && toMarkSkip !== containingCall);
+                getNodeLinks(containingCall).resolvedSignature = containingCallResolvedSignature;
+            }
+            return result;
+        }
+
+        function getResolvedSignatureWorker(nodeIn: CallLikeExpression, candidatesOutArray: Signature[] | undefined, argumentCount: number | undefined, checkMode: CheckMode, editingArgument?: Node): Signature | undefined {
             const node = getParseTreeNode(nodeIn, isCallLikeExpression);
             apparentArgumentCount = argumentCount;
-            const res = node ? getResolvedSignature(node, candidatesOutArray, checkMode) : undefined;
+            const res =
+                !node ? undefined :
+                editingArgument ? runWithInferenceBlockedFromSourceNode(editingArgument, () => getResolvedSignature(node, candidatesOutArray, checkMode)) :
+                getResolvedSignature(node, candidatesOutArray, checkMode);
             apparentArgumentCount = undefined;
             return res;
         }
@@ -1789,6 +1803,11 @@ namespace ts {
             }
         }
 
+        function isConstAssertion(location: Node) {
+            return (isAssertionExpression(location) && isConstTypeReference(location.type))
+                || (isJSDocTypeTag(location) && isConstTypeReference(location.typeExpression));
+        }
+
         /**
          * Resolve a given name for a given meaning at a given location. An error is reported if the name was not found and
          * the nameNotFoundMessage argument is not undefined. Returns the resolved symbol, or undefined if no symbol with
@@ -1830,6 +1849,11 @@ namespace ts {
             let isInExternalModule = false;
 
             loop: while (location) {
+                if (name === "const" && isConstAssertion(location)) {
+                    // `const` in an `as const` has no symbol, but issues no error because there is no *actual* lookup of the type
+                    // (it refers to the constant type of the expression instead)
+                    return undefined;
+                }
                 // Locals of a source file are not in scope (because they get merged into the global symbol table)
                 if (location.locals && !isGlobalSourceFile(location)) {
                     if (result = lookup(location.locals, name, meaning)) {
@@ -5238,7 +5262,18 @@ namespace ts {
                         if (!nodeIsSynthesized(node) && getParseTreeNode(node) === node) {
                             return node;
                         }
-                        return setTextRange(factory.cloneNode(visitEachChild(node, deepCloneOrReuseNode, nullTransformationContext)), node);
+                        return setTextRange(factory.cloneNode(visitEachChild(node, deepCloneOrReuseNode, nullTransformationContext, deepCloneOrReuseNodes)), node);
+                    }
+
+                    function deepCloneOrReuseNodes<T extends Node>(nodes: NodeArray<T>, visitor: Visitor | undefined, test?: (node: Node) => boolean, start?: number, count?: number): NodeArray<T>;
+                    function deepCloneOrReuseNodes<T extends Node>(nodes: NodeArray<T> | undefined, visitor: Visitor | undefined, test?: (node: Node) => boolean, start?: number, count?: number): NodeArray<T> | undefined;
+                    function deepCloneOrReuseNodes<T extends Node>(nodes: NodeArray<T> | undefined, visitor: Visitor | undefined, test?: (node: Node) => boolean, start?: number, count?: number): NodeArray<T> | undefined {
+                        if (nodes && nodes.length === 0) {
+                            // Ensure we explicitly make a copy of an empty array; visitNodes will not do this unless the array has elements,
+                            // which can lead to us reusing the same empty NodeArray more than once within the same AST during type noding.
+                            return setTextRange(factory.createNodeArray<T>(/*nodes*/ undefined, nodes.hasTrailingComma), nodes);
+                        }
+                        return visitNodes(nodes, visitor, test, start, count);
                     }
                 }
 
@@ -8519,6 +8554,8 @@ namespace ts {
                     return !!(target as TypeReference).resolvedTypeArguments;
                 case TypeSystemPropertyName.ResolvedBaseTypes:
                     return !!(target as InterfaceType).baseTypesResolved;
+                case TypeSystemPropertyName.WriteType:
+                    return !!getSymbolLinks(target as Symbol).writeType;
             }
             return Debug.assertNever(propertyName);
         }
@@ -9502,6 +9539,11 @@ namespace ts {
                 }
                 return getWidenedType(getWidenedLiteralType(checkExpression(declaration.statements[0].expression)));
             }
+            if (isAccessor(declaration)) {
+                // Binding of certain patterns in JS code will occasionally mark symbols as both properties
+                // and accessors. Here we dispatch to accessor resolution if needed.
+                return getTypeOfAccessors(symbol);
+            }
 
             // Handle variable, parameter or property
             if (!pushTypeResolution(symbol, TypeSystemPropertyName.Type)) {
@@ -9567,9 +9609,6 @@ namespace ts {
             else if (isEnumMember(declaration)) {
                 type = getTypeOfEnumMember(symbol);
             }
-            else if (isAccessor(declaration)) {
-                type = resolveTypeOfAccessors(symbol) || Debug.fail("Non-write accessor resolution must always produce a type");
-            }
             else {
                 return Debug.fail("Unhandled declaration kind! " + Debug.formatSyntaxKind(declaration.kind) + " for " + Debug.formatSymbol(symbol));
             }
@@ -9614,97 +9653,62 @@ namespace ts {
 
         function getTypeOfAccessors(symbol: Symbol): Type {
             const links = getSymbolLinks(symbol);
-            return links.type || (links.type = getTypeOfAccessorsWorker(symbol) || Debug.fail("Read type of accessor must always produce a type"));
-        }
-
-        function getTypeOfSetAccessor(symbol: Symbol): Type | undefined {
-            const links = getSymbolLinks(symbol);
-            return links.writeType || (links.writeType = getTypeOfAccessorsWorker(symbol, /*writing*/ true));
-        }
-
-        function getTypeOfAccessorsWorker(symbol: Symbol, writing = false): Type | undefined {
-            if (!pushTypeResolution(symbol, TypeSystemPropertyName.Type)) {
-                return errorType;
-            }
-
-            let type = resolveTypeOfAccessors(symbol, writing);
-            if (!popTypeResolution()) {
+            if (!links.type) {
+                if (!pushTypeResolution(symbol, TypeSystemPropertyName.Type)) {
+                    return errorType;
+                }
                 const getter = getDeclarationOfKind<AccessorDeclaration>(symbol, SyntaxKind.GetAccessor);
-                if (getter) {
-                    if (getEffectiveTypeAnnotationNode(getter)) {
-                        error(getter.name, Diagnostics._0_is_referenced_directly_or_indirectly_in_its_own_type_annotation, symbolToString(symbol));
+                const setter = getDeclarationOfKind<AccessorDeclaration>(symbol, SyntaxKind.SetAccessor);
+                // We try to resolve a getter type annotation, a setter type annotation, or a getter function
+                // body return type inference, in that order.
+                let type = getter && isInJSFile(getter) && getTypeForDeclarationFromJSDocComment(getter) ||
+                    getAnnotatedAccessorType(getter) ||
+                    getAnnotatedAccessorType(setter) ||
+                    getter && getter.body && getReturnTypeFromBody(getter);
+                if (!type) {
+                    if (setter && !isPrivateWithinAmbient(setter)) {
+                        errorOrSuggestion(noImplicitAny, setter, Diagnostics.Property_0_implicitly_has_type_any_because_its_set_accessor_lacks_a_parameter_type_annotation, symbolToString(symbol));
                     }
-                    else if (noImplicitAny) {
+                    else if (getter && !isPrivateWithinAmbient(getter)) {
+                        errorOrSuggestion(noImplicitAny, getter, Diagnostics.Property_0_implicitly_has_type_any_because_its_get_accessor_lacks_a_return_type_annotation, symbolToString(symbol));
+                    }
+                    type = anyType;
+                }
+                if (!popTypeResolution()) {
+                    if (getAnnotatedAccessorTypeNode(getter)) {
+                        error(getter, Diagnostics._0_is_referenced_directly_or_indirectly_in_its_own_type_annotation, symbolToString(symbol));
+                    }
+                    else if (getAnnotatedAccessorTypeNode(setter)) {
+                        error(setter, Diagnostics._0_is_referenced_directly_or_indirectly_in_its_own_type_annotation, symbolToString(symbol));
+                    }
+                    else if (getter && noImplicitAny) {
                         error(getter, Diagnostics._0_implicitly_has_return_type_any_because_it_does_not_have_a_return_type_annotation_and_is_referenced_directly_or_indirectly_in_one_of_its_return_expressions, symbolToString(symbol));
                     }
+                    type = anyType;
                 }
-                type = anyType;
+                links.type = type;
             }
-            return type;
+            return links.type;
         }
 
-        function resolveTypeOfAccessors(symbol: Symbol, writing = false) {
-            const getter = getDeclarationOfKind<AccessorDeclaration>(symbol, SyntaxKind.GetAccessor);
-            const setter = getDeclarationOfKind<AccessorDeclaration>(symbol, SyntaxKind.SetAccessor);
-
-            // For write operations, prioritize type annotations on the setter
-            if (writing) {
-                const setterType = getAnnotatedAccessorType(setter);
-                if (setterType) {
-                    return instantiateTypeIfNeeded(setterType, symbol);
+        function getWriteTypeOfAccessors(symbol: Symbol): Type {
+            const links = getSymbolLinks(symbol);
+            if (!links.writeType) {
+                if (!pushTypeResolution(symbol, TypeSystemPropertyName.WriteType)) {
+                    return errorType;
                 }
-            }
-            // Else defer to the getter type
-
-            if (getter && isInJSFile(getter)) {
-                const jsDocType = getTypeForDeclarationFromJSDocComment(getter);
-                if (jsDocType) {
-                    return instantiateTypeIfNeeded(jsDocType, symbol);
+                const setter = getDeclarationOfKind<AccessorDeclaration>(symbol, SyntaxKind.SetAccessor);
+                let writeType = getAnnotatedAccessorType(setter);
+                if (!popTypeResolution()) {
+                    if (getAnnotatedAccessorTypeNode(setter)) {
+                        error(setter, Diagnostics._0_is_referenced_directly_or_indirectly_in_its_own_type_annotation, symbolToString(symbol));
+                    }
+                    writeType = anyType;
                 }
+                // Absent an explicit setter type annotation we use the read type of the accessor.
+                links.writeType = writeType || getTypeOfAccessors(symbol);
             }
-
-            // Try to see if the user specified a return type on the get-accessor.
-            const getterType = getAnnotatedAccessorType(getter);
-            if (getterType) {
-                return instantiateTypeIfNeeded(getterType, symbol);
-            }
-
-            // If the user didn't specify a return type, try to use the set-accessor's parameter type.
-            const setterType = getAnnotatedAccessorType(setter);
-            if (setterType) {
-                return setterType;
-            }
-
-            // If there are no specified types, try to infer it from the body of the get accessor if it exists.
-            if (getter && getter.body) {
-                const returnTypeFromBody = getReturnTypeFromBody(getter);
-                return instantiateTypeIfNeeded(returnTypeFromBody, symbol);
-            }
-
-            // Otherwise, fall back to 'any'.
-            if (setter) {
-                if (!isPrivateWithinAmbient(setter)) {
-                    errorOrSuggestion(noImplicitAny, setter, Diagnostics.Property_0_implicitly_has_type_any_because_its_set_accessor_lacks_a_parameter_type_annotation, symbolToString(symbol));
-                }
-                return anyType;
-            }
-            else if (getter) {
-                Debug.assert(!!getter, "there must exist a getter as we are current checking either setter or getter in this function");
-                if (!isPrivateWithinAmbient(getter)) {
-                    errorOrSuggestion(noImplicitAny, getter, Diagnostics.Property_0_implicitly_has_type_any_because_its_get_accessor_lacks_a_return_type_annotation, symbolToString(symbol));
-                }
-                return anyType;
-            }
-            return undefined;
-
-            function instantiateTypeIfNeeded(type: Type, symbol: Symbol) {
-                if (getCheckFlags(symbol) & CheckFlags.Instantiated) {
-                    const links = getSymbolLinks(symbol);
-                    return instantiateType(type, links.mapper);
-                }
-
-                return type;
-            }
+            return links.writeType;
         }
 
         function getBaseTypeVariableOfClass(symbol: Symbol) {
@@ -9792,17 +9796,12 @@ namespace ts {
 
         function getTypeOfInstantiatedSymbol(symbol: Symbol): Type {
             const links = getSymbolLinks(symbol);
-            if (!links.type) {
-                if (!pushTypeResolution(symbol, TypeSystemPropertyName.Type)) {
-                    return links.type = errorType;
-                }
-                let type = instantiateType(getTypeOfSymbol(links.target!), links.mapper);
-                if (!popTypeResolution()) {
-                    type = reportCircularityError(symbol);
-                }
-                links.type = type;
-            }
-            return links.type;
+            return links.type || (links.type = instantiateType(getTypeOfSymbol(links.target!), links.mapper));
+        }
+
+        function getWriteTypeOfInstantiatedSymbol(symbol: Symbol): Type {
+            const links = getSymbolLinks(symbol);
+            return links.writeType || (links.writeType = instantiateType(getWriteTypeOfSymbol(links.target!), links.mapper));
         }
 
         function reportCircularityError(symbol: Symbol) {
@@ -9845,36 +9844,23 @@ namespace ts {
         }
 
         /**
-         * Distinct write types come only from set accessors, but union and intersection
-         * properties deriving from set accessors will either pre-compute or defer the
-         * union or intersection of the writeTypes of their constituents. To account for
-         * this, we will assume that any deferred type or transient symbol may have a
-         * `writeType` (or a deferred write type ready to be computed) that should be
-         * used before looking for set accessor declarations.
+         * Distinct write types come only from set accessors, but synthetic union and intersection
+         * properties deriving from set accessors will either pre-compute or defer the union or
+         * intersection of the writeTypes of their constituents.
          */
         function getWriteTypeOfSymbol(symbol: Symbol): Type {
             const checkFlags = getCheckFlags(symbol);
-            if (checkFlags & CheckFlags.DeferredType) {
-                const writeType = getWriteTypeOfSymbolWithDeferredType(symbol);
-                if (writeType) {
-                    return writeType;
-                }
+            if (symbol.flags & SymbolFlags.Property) {
+                return checkFlags & CheckFlags.SyntheticProperty ?
+                    checkFlags & CheckFlags.DeferredType ?
+                        getWriteTypeOfSymbolWithDeferredType(symbol) || getTypeOfSymbolWithDeferredType(symbol) :
+                        (symbol as TransientSymbol).writeType || (symbol as TransientSymbol).type! :
+                    getTypeOfSymbol(symbol);
             }
-            if (symbol.flags & SymbolFlags.Transient) {
-                const { writeType } = symbol as TransientSymbol;
-                if (writeType) {
-                    return writeType;
-                }
-            }
-            return getSetAccessorTypeOfSymbol(symbol);
-        }
-
-        function getSetAccessorTypeOfSymbol(symbol: Symbol): Type {
             if (symbol.flags & SymbolFlags.Accessor) {
-                const type = getTypeOfSetAccessor(symbol);
-                if (type) {
-                    return type;
-                }
+                return checkFlags & CheckFlags.Instantiated ?
+                    getWriteTypeOfInstantiatedSymbol(symbol) :
+                    getWriteTypeOfAccessors(symbol);
             }
             return getTypeOfSymbol(symbol);
         }
@@ -22702,7 +22688,7 @@ namespace ts {
                 const properties = getPropertiesOfObjectType(target);
                 for (const targetProp of properties) {
                     const sourceProp = getPropertyOfType(source, targetProp.escapedName);
-                    if (sourceProp) {
+                    if (sourceProp && !some(sourceProp.declarations, hasSkipDirectInferenceFlag)) {
                         inferFromTypes(getTypeOfSymbol(sourceProp), getTypeOfSymbol(targetProp));
                     }
                 }
@@ -25237,7 +25223,7 @@ namespace ts {
                 }
             }
             if (isDeclarationName(location) && isSetAccessor(location.parent) && getAnnotatedAccessorTypeNode(location.parent)) {
-                return resolveTypeOfAccessors(location.parent.symbol, /*writing*/ true)!;
+                return getWriteTypeOfAccessors(location.parent.symbol);
             }
             // The location isn't a reference to the given symbol, meaning we're being asked
             // a hypothetical question of what type the symbol would have if there was a reference
@@ -25464,7 +25450,7 @@ namespace ts {
                     if (func.parameters.length >= 2 && isContextSensitiveFunctionOrObjectLiteralMethod(func)) {
                         const contextualSignature = getContextualSignature(func);
                         if (contextualSignature && contextualSignature.parameters.length === 1 && signatureHasRestParameter(contextualSignature)) {
-                            const restType = getTypeOfSymbol(contextualSignature.parameters[0]);
+                            const restType = getReducedApparentType(getTypeOfSymbol(contextualSignature.parameters[0]));
                             if (restType.flags & TypeFlags.Union && everyType(restType, isTupleType) && !isSymbolAssigned(symbol)) {
                                 const narrowedType = getFlowTypeOfReference(func, restType, restType, /*flowContainer*/ undefined, location.flowNode);
                                 const index = func.parameters.indexOf(declaration) - (getThisParameter(func) ? 1 : 0);
@@ -26916,9 +26902,14 @@ namespace ts {
                         return instantiateInstantiableTypes(contextualType, inferenceContext.nonFixingMapper);
                     }
                     // For other purposes (e.g. determining whether to produce literal types) we only
-                    // incorporate inferences made from the return type in a function call.
+                    // incorporate inferences made from the return type in a function call. We remove
+                    // the 'boolean' type from the contextual type such that contextually typed boolean
+                    // literals actually end up widening to 'boolean' (see #48363).
                     if (inferenceContext.returnMapper) {
-                        return instantiateInstantiableTypes(contextualType, inferenceContext.returnMapper);
+                        const type = instantiateInstantiableTypes(contextualType, inferenceContext.returnMapper);
+                        return type.flags & TypeFlags.Union && containsType((type as UnionType).types, regularFalseType) && containsType((type as UnionType).types, regularTrueType) ?
+                            filterType(type, t => t !== regularFalseType && t !== regularTrueType) :
+                            type;
                     }
                 }
             }
@@ -29784,7 +29775,7 @@ namespace ts {
 
             for (let i = 0; i < argCount; i++) {
                 const arg = args[i];
-                if (arg.kind !== SyntaxKind.OmittedExpression) {
+                if (arg.kind !== SyntaxKind.OmittedExpression && !(checkMode & CheckMode.IsForStringLiteralArgumentCompletions && hasSkipDirectInferenceFlag(arg))) {
                     const paramType = getTypeAtPosition(signature, i);
                     const argType = checkExpressionWithContextualType(arg, paramType, context, checkMode);
                     inferTypes(context.inferences, argType, paramType);
@@ -30524,7 +30515,7 @@ namespace ts {
                 }
             }
 
-            return getCandidateForOverloadFailure(node, candidates, args, !!candidatesOutArray);
+            return getCandidateForOverloadFailure(node, candidates, args, !!candidatesOutArray, checkMode);
 
             function addImplementationSuccessElaboration(failed: Signature, diagnostic: Diagnostic) {
                 const oldCandidatesForArgumentError = candidatesForArgumentError;
@@ -30638,6 +30629,7 @@ namespace ts {
             candidates: Signature[],
             args: readonly Expression[],
             hasCandidatesOutArray: boolean,
+            checkMode: CheckMode,
         ): Signature {
             Debug.assert(candidates.length > 0); // Else should not have called this.
             checkNodeDeferred(node);
@@ -30645,7 +30637,7 @@ namespace ts {
             // Don't do this if there is a `candidatesOutArray`,
             // because then we want the chosen best candidate to be one of the overloads, not a combination.
             return hasCandidatesOutArray || candidates.length === 1 || candidates.some(c => !!c.typeParameters)
-                ? pickLongestCandidateSignature(node, candidates, args)
+                ? pickLongestCandidateSignature(node, candidates, args, checkMode)
                 : createUnionOfSignaturesForOverloadFailure(candidates);
         }
 
@@ -30699,7 +30691,7 @@ namespace ts {
             return createSymbolWithType(first(sources), type);
         }
 
-        function pickLongestCandidateSignature(node: CallLikeExpression, candidates: Signature[], args: readonly Expression[]): Signature {
+        function pickLongestCandidateSignature(node: CallLikeExpression, candidates: Signature[], args: readonly Expression[], checkMode: CheckMode): Signature {
             // Pick the longest signature. This way we can get a contextual type for cases like:
             //     declare function f(a: { xa: number; xb: number; }, b: number);
             //     f({ |
@@ -30716,7 +30708,7 @@ namespace ts {
             const typeArgumentNodes: readonly TypeNode[] | undefined = callLikeExpressionMayHaveTypeArguments(node) ? node.typeArguments : undefined;
             const instantiated = typeArgumentNodes
                 ? createSignatureInstantiation(candidate, getTypeArgumentsFromNodes(typeArgumentNodes, typeParameters, isInJSFile(node)))
-                : inferSignatureInstantiationForOverloadFailure(node, typeParameters, candidate, args);
+                : inferSignatureInstantiationForOverloadFailure(node, typeParameters, candidate, args, checkMode);
             candidates[bestIndex] = instantiated;
             return instantiated;
         }
@@ -30732,9 +30724,9 @@ namespace ts {
             return typeArguments;
         }
 
-        function inferSignatureInstantiationForOverloadFailure(node: CallLikeExpression, typeParameters: readonly TypeParameter[], candidate: Signature, args: readonly Expression[]): Signature {
+        function inferSignatureInstantiationForOverloadFailure(node: CallLikeExpression, typeParameters: readonly TypeParameter[], candidate: Signature, args: readonly Expression[], checkMode: CheckMode): Signature {
             const inferenceContext = createInferenceContext(typeParameters, candidate, /*flags*/ isInJSFile(node) ? InferenceFlags.AnyDefault : InferenceFlags.None);
-            const typeArgumentTypes = inferTypeArguments(node, candidate, args, CheckMode.SkipContextSensitive | CheckMode.SkipGenericFunctions, inferenceContext);
+            const typeArgumentTypes = inferTypeArguments(node, candidate, args, checkMode | CheckMode.SkipContextSensitive | CheckMode.SkipGenericFunctions, inferenceContext);
             return createSignatureInstantiation(candidate, typeArgumentTypes);
         }
 
@@ -37679,6 +37671,7 @@ namespace ts {
                     (condExpr.operatorToken.kind === SyntaxKind.BarBarToken || condExpr.operatorToken.kind === SyntaxKind.AmpersandAmpersandToken)
                     ? condExpr.right
                     : condExpr;
+                if (isModuleExportsAccessExpression(location)) return;
                 const type = checkTruthinessExpression(location);
                 const isPropertyExpressionCast = isPropertyAccessExpression(location) && isTypeAssertion(location.expression);
                 if (getFalsyFlags(type) || isPropertyExpressionCast) return;
