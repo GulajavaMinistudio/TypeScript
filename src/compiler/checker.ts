@@ -15860,7 +15860,11 @@ namespace ts {
         }
 
         function isSingletonTupleType(node: TypeNode) {
-            return isTupleTypeNode(node) && length(node.elements) === 1 && !isOptionalTypeNode(node.elements[0]) && !isRestTypeNode(node.elements[0]);
+            return isTupleTypeNode(node) &&
+                length(node.elements) === 1 &&
+                !isOptionalTypeNode(node.elements[0]) &&
+                !isRestTypeNode(node.elements[0]) &&
+                !(isNamedTupleMember(node.elements[0]) && (node.elements[0].questionToken || node.elements[0].dotDotDotToken));
         }
 
         /**
@@ -20640,6 +20644,9 @@ namespace ts {
         function createMarkerType(symbol: Symbol, source: TypeParameter, target: Type) {
             const mapper = makeUnaryTypeMapper(source, target);
             const type = getDeclaredTypeOfSymbol(symbol);
+            if (isErrorType(type)) {
+                return type;
+            }
             const result = symbol.flags & SymbolFlags.TypeAlias ?
                 getTypeAliasInstantiation(symbol, instantiateTypes(getSymbolLinks(symbol).typeParameters!, mapper)) :
                 createTypeReference(type as GenericType, instantiateTypes((type as GenericType).typeParameters, mapper));
