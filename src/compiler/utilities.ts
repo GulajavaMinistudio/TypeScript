@@ -2338,18 +2338,13 @@ namespace ts {
         if (isPropertyNameLiteral(name) && isPropertyNameLiteral(initializer)) {
             return getTextOfIdentifierOrLiteral(name) === getTextOfIdentifierOrLiteral(initializer);
         }
-        if (isIdentifier(name) && isLiteralLikeAccess(initializer) &&
+        if (isMemberName(name) && isLiteralLikeAccess(initializer) &&
             (initializer.expression.kind === SyntaxKind.ThisKeyword ||
                 isIdentifier(initializer.expression) &&
                 (initializer.expression.escapedText === "window" ||
                     initializer.expression.escapedText === "self" ||
                     initializer.expression.escapedText === "global"))) {
-
-            const nameOrArgument = getNameOrArgument(initializer);
-            if (isPrivateIdentifier(nameOrArgument)) {
-                Debug.fail("Unexpected PrivateIdentifier in name expression with literal-like access.");
-            }
-            return isSameEntityName(name, nameOrArgument);
+            return isSameEntityName(name, getNameOrArgument(initializer));
         }
         if (isLiteralLikeAccess(name) && isLiteralLikeAccess(initializer)) {
             return getElementOrPropertyAccessName(name) === getElementOrPropertyAccessName(initializer)
@@ -7658,5 +7653,9 @@ namespace ts {
         fileNameIndex = partStart;
 
         return state > States.NodeModules ? { topLevelNodeModulesIndex, topLevelPackageNameIndex, packageRootIndex, fileNameIndex } : undefined;
+    }
+
+    export function getParameterTypeNode(parameter: ParameterDeclaration | JSDocParameterTag) {
+        return parameter.kind === SyntaxKind.JSDocParameterTag ? parameter.typeExpression?.type : parameter.type;
     }
 }
