@@ -435,6 +435,10 @@
         "category": "Error",
         "code": 1144
     },
+    "'{' or JSX element expected.": {
+        "category": "Error",
+        "code": 1145
+    },
     "Declaration expected.": {
         "category": "Error",
         "code": 1146
@@ -3454,6 +3458,10 @@
     "All declarations of '{0}' must have identical constraints.": {
         "category": "Error",
         "code": 2838
+    },
+    "This condition will always return '{0}' since JavaScript compares objects by reference, not value.": {
+        "category": "Error",
+        "code": 2839
     },
 
     "Import declaration '{0}' is using private name '{1}'.": {
