@@ -3576,7 +3576,51 @@ namespace ts {
                         // An override clause will take effect for type-only imports and import types, and allows importing the types across formats, regardless of
                         // normal mode restrictions
                         if (isSyncImport && sourceFile.impliedNodeFormat === ModuleKind.ESNext && !getResolutionModeOverrideForClause(overrideClause)) {
-                            error(errorNode, Diagnostics.Module_0_cannot_be_imported_using_this_construct_The_specifier_only_resolves_to_an_ES_module_which_cannot_be_imported_synchronously_Use_dynamic_import_instead, moduleReference);
+                            if (findAncestor(location, isImportEqualsDeclaration)) {
+                                // ImportEquals in a ESM file resolving to another ESM file
+                                error(errorNode, Diagnostics.Module_0_cannot_be_imported_using_this_construct_The_specifier_only_resolves_to_an_ES_module_which_cannot_be_imported_with_require_Use_an_ECMAScript_import_instead, moduleReference);
+                            }
+                            else {
+                                // CJS file resolving to an ESM file
+                                let diagnosticDetails;
+                                const ext = tryGetExtensionFromPath(currentSourceFile.fileName);
+                                if (ext === Extension.Ts || ext === Extension.Js || ext === Extension.Tsx || ext === Extension.Jsx) {
+                                    const scope = currentSourceFile.packageJsonScope;
+                                    const targetExt = ext === Extension.Ts ? Extension.Mts : ext === Extension.Js ? Extension.Mjs : undefined;
+                                    if (scope && !scope.packageJsonContent.type) {
+                                        if (targetExt) {
+                                            diagnosticDetails = chainDiagnosticMessages(
+                                                /*details*/ undefined,
+                                                Diagnostics.To_convert_this_file_to_an_ECMAScript_module_change_its_file_extension_to_0_or_add_the_field_type_Colon_module_to_1,
+                                                targetExt,
+                                                combinePaths(scope.packageDirectory, "package.json"));
+                                        }
+                                        else {
+                                            diagnosticDetails = chainDiagnosticMessages(
+                                                /*details*/ undefined,
+                                                Diagnostics.To_convert_this_file_to_an_ECMAScript_module_add_the_field_type_Colon_module_to_0,
+                                                combinePaths(scope.packageDirectory, "package.json"));
+                                        }
+                                    }
+                                    else {
+                                        if (targetExt) {
+                                            diagnosticDetails = chainDiagnosticMessages(
+                                                /*details*/ undefined,
+                                                Diagnostics.To_convert_this_file_to_an_ECMAScript_module_change_its_file_extension_to_0_or_create_a_local_package_json_file_with_type_Colon_module,
+                                                targetExt);
+                                        }
+                                        else {
+                                            diagnosticDetails = chainDiagnosticMessages(
+                                                /*details*/ undefined,
+                                                Diagnostics.To_convert_this_file_to_an_ECMAScript_module_create_a_local_package_json_file_with_type_Colon_module);
+                                        }
+                                    }
+                                }
+                                diagnostics.add(createDiagnosticForNodeFromMessageChain(errorNode, chainDiagnosticMessages(
+                                    diagnosticDetails,
+                                    Diagnostics.The_current_file_is_a_CommonJS_module_whose_imports_will_produce_require_calls_however_the_referenced_file_is_an_ECMAScript_module_and_cannot_be_imported_with_require_Consider_writing_a_dynamic_import_0_call_instead,
+                                    moduleReference)));
+                            }
                         }
                     }
                     // merged symbol is module declaration symbol combined with all augmentations
@@ -19381,7 +19425,27 @@ namespace ts {
 
             function structuredTypeRelatedTo(source: Type, target: Type, reportErrors: boolean, intersectionState: IntersectionState): Ternary {
                 const saveErrorInfo = captureErrorCalculationState();
-                const result = structuredTypeRelatedToWorker(source, target, reportErrors, intersectionState, saveErrorInfo);
+                let result = structuredTypeRelatedToWorker(source, target, reportErrors, intersectionState, saveErrorInfo);
+                if (!result && (source.flags & TypeFlags.Intersection || source.flags & TypeFlags.TypeParameter && target.flags & TypeFlags.Union)) {
+                    // The combined constraint of an intersection type is the intersection of the constraints of
+                    // the constituents. When an intersection type contains instantiable types with union type
+                    // constraints, there are situations where we need to examine the combined constraint. One is
+                    // when the target is a union type. Another is when the intersection contains types belonging
+                    // to one of the disjoint domains. For example, given type variables T and U, each with the
+                    // constraint 'string | number', the combined constraint of 'T & U' is 'string | number' and
+                    // we need to check this constraint against a union on the target side. Also, given a type
+                    // variable V constrained to 'string | number', 'V & number' has a combined constraint of
+                    // 'string & number | number & number' which reduces to just 'number'.
+                    // This also handles type parameters, as a type parameter with a union constraint compared against a union
+                    // needs to have its constraint hoisted into an intersection with said type parameter, this way
+                    // the type param can be compared with itself in the target (with the influence of its constraint to match other parts)
+                    // For example, if `T extends 1 | 2` and `U extends 2 | 3` and we compare `T & U` to `T & U & (1 | 2 | 3)`
+                    const constraint = getEffectiveConstraintOfIntersection(source.flags & TypeFlags.Intersection ? (source as IntersectionType).types: [source], !!(target.flags & TypeFlags.Union));
+                    if (constraint && everyType(constraint, c => c !== source)) { // Skip comparison if expansion contains the source itself
+                        // TODO: Stack errors so we get a pyramid for the "normal" comparison above, _and_ a second for this
+                        result = isRelatedTo(constraint, target, RecursionFlags.Source, /*reportErrors*/ false, /*headMessage*/ undefined, intersectionState);
+                    }
+                }
                 if (result) {
                     resetErrorInfo(saveErrorInfo);
                 }
@@ -19439,28 +19503,6 @@ namespace ts {
                 else if (sourceFlags & TypeFlags.UnionOrIntersection || targetFlags & TypeFlags.UnionOrIntersection) {
                     if (result = unionOrIntersectionRelatedTo(source, target, reportErrors, intersectionState)) {
                         return result;
-                    }
-                    if (source.flags & TypeFlags.Intersection || source.flags & TypeFlags.TypeParameter && target.flags & TypeFlags.Union) {
-                        // The combined constraint of an intersection type is the intersection of the constraints of
-                        // the constituents. When an intersection type contains instantiable types with union type
-                        // constraints, there are situations where we need to examine the combined constraint. One is
-                        // when the target is a union type. Another is when the intersection contains types belonging
-                        // to one of the disjoint domains. For example, given type variables T and U, each with the
-                        // constraint 'string | number', the combined constraint of 'T & U' is 'string | number' and
-                        // we need to check this constraint against a union on the target side. Also, given a type
-                        // variable V constrained to 'string | number', 'V & number' has a combined constraint of
-                        // 'string & number | number & number' which reduces to just 'number'.
-                        // This also handles type parameters, as a type parameter with a union constraint compared against a union
-                        // needs to have its constraint hoisted into an intersection with said type parameter, this way
-                        // the type param can be compared with itself in the target (with the influence of its constraint to match other parts)
-                        // For example, if `T extends 1 | 2` and `U extends 2 | 3` and we compare `T & U` to `T & U & (1 | 2 | 3)`
-                        const constraint = getEffectiveConstraintOfIntersection(source.flags & TypeFlags.Intersection ? (source as IntersectionType).types: [source], !!(target.flags & TypeFlags.Union));
-                        if (constraint && everyType(constraint, c => c !== source)) { // Skip comparison if expansion contains the source itself
-                            // TODO: Stack errors so we get a pyramid for the "normal" comparison above, _and_ a second for this
-                            if (result = isRelatedTo(constraint, target, RecursionFlags.Source, /*reportErrors*/ false, /*headMessage*/ undefined, intersectionState)) {
-                                return result;
-                            }
-                        }
                     }
                     // The ordered decomposition above doesn't handle all cases. Specifically, we also need to handle:
                     // Source is instantiable (e.g. source has union or intersection constraint).
@@ -38821,12 +38863,21 @@ namespace ts {
             }
 
             if (!(type.flags & TypeFlags.Union)) {
-                const iterationTypes = getIterationTypesOfIterableWorker(type, use, errorNode);
+                const errorOutputContainer: { errors: Diagnostic[] | undefined } | undefined = errorNode ? { errors: undefined } : undefined;
+                const iterationTypes = getIterationTypesOfIterableWorker(type, use, errorNode, errorOutputContainer);
                 if (iterationTypes === noIterationTypes) {
                     if (errorNode) {
-                        reportTypeNotIterableError(errorNode, type, !!(use & IterationUse.AllowsAsyncIterablesFlag));
+                        const rootDiag = reportTypeNotIterableError(errorNode, type, !!(use & IterationUse.AllowsAsyncIterablesFlag));
+                        if (errorOutputContainer?.errors) {
+                            addRelatedInfo(rootDiag, ...errorOutputContainer.errors);
+                        }
                     }
                     return undefined;
+                }
+                else if (errorOutputContainer?.errors?.length) {
+                    for (const diag of errorOutputContainer.errors) {
+                        diagnostics.add(diag);
+                    }
                 }
                 return iterationTypes;
             }
@@ -38837,17 +38888,25 @@ namespace ts {
 
             let allIterationTypes: IterationTypes[] | undefined;
             for (const constituent of (type as UnionType).types) {
-                const iterationTypes = getIterationTypesOfIterableWorker(constituent, use, errorNode);
+                const errorOutputContainer: { errors: Diagnostic[] | undefined } | undefined = errorNode ? { errors: undefined } : undefined;
+                const iterationTypes = getIterationTypesOfIterableWorker(constituent, use, errorNode, errorOutputContainer);
                 if (iterationTypes === noIterationTypes) {
                     if (errorNode) {
-                        reportTypeNotIterableError(errorNode, type, !!(use & IterationUse.AllowsAsyncIterablesFlag));
+                        const rootDiag = reportTypeNotIterableError(errorNode, type, !!(use & IterationUse.AllowsAsyncIterablesFlag));
+                        if (errorOutputContainer?.errors) {
+                            addRelatedInfo(rootDiag, ...errorOutputContainer.errors);
+                        }
                     }
                     setCachedIterationTypes(type, cacheKey, noIterationTypes);
                     return undefined;
                 }
-                else {
-                    allIterationTypes = append(allIterationTypes, iterationTypes);
+                else if (errorOutputContainer?.errors?.length) {
+                    for (const diag of errorOutputContainer.errors) {
+                        diagnostics.add(diag);
+                    }
                 }
+
+                allIterationTypes = append(allIterationTypes, iterationTypes);
             }
 
             const iterationTypes = allIterationTypes ? combineIterationTypes(allIterationTypes) : noIterationTypes;
@@ -38879,53 +38938,69 @@ namespace ts {
          * NOTE: You probably don't want to call this directly and should be calling
          * `getIterationTypesOfIterable` instead.
          */
-        function getIterationTypesOfIterableWorker(type: Type, use: IterationUse, errorNode: Node | undefined) {
+        function getIterationTypesOfIterableWorker(type: Type, use: IterationUse, errorNode: Node | undefined, errorOutputContainer: { errors: Diagnostic[] | undefined } | undefined) {
             if (isTypeAny(type)) {
                 return anyIterationTypes;
             }
+
+            // If we are reporting errors and encounter a cached `noIterationTypes`, we should ignore the cached value and continue as if nothing was cached.
+            // In addition, we should not cache any new results for this call.
+            let noCache = false;
 
             if (use & IterationUse.AllowsAsyncIterablesFlag) {
                 const iterationTypes =
                     getIterationTypesOfIterableCached(type, asyncIterationTypesResolver) ||
                     getIterationTypesOfIterableFast(type, asyncIterationTypesResolver);
                 if (iterationTypes) {
-                    return use & IterationUse.ForOfFlag ?
-                        getAsyncFromSyncIterationTypes(iterationTypes, errorNode) :
-                        iterationTypes;
+                    if (iterationTypes === noIterationTypes && errorNode) {
+                        // ignore the cached value
+                        noCache = true;
+                    }
+                    else {
+                        return use & IterationUse.ForOfFlag ?
+                            getAsyncFromSyncIterationTypes(iterationTypes, errorNode) :
+                            iterationTypes;
+                    }
                 }
             }
 
             if (use & IterationUse.AllowsSyncIterablesFlag) {
-                const iterationTypes =
+                let iterationTypes =
                     getIterationTypesOfIterableCached(type, syncIterationTypesResolver) ||
                     getIterationTypesOfIterableFast(type, syncIterationTypesResolver);
                 if (iterationTypes) {
-                    if (use & IterationUse.AllowsAsyncIterablesFlag) {
-                        // for a sync iterable in an async context, only use the cached types if they are valid.
-                        if (iterationTypes !== noIterationTypes) {
-                            return setCachedIterationTypes(type, "iterationTypesOfAsyncIterable", getAsyncFromSyncIterationTypes(iterationTypes, errorNode));
-                        }
+                    if (iterationTypes === noIterationTypes && errorNode) {
+                        // ignore the cached value
+                        noCache = true;
                     }
                     else {
-                        return iterationTypes;
+                        if (use & IterationUse.AllowsAsyncIterablesFlag) {
+                            // for a sync iterable in an async context, only use the cached types if they are valid.
+                            if (iterationTypes !== noIterationTypes) {
+                                iterationTypes = getAsyncFromSyncIterationTypes(iterationTypes, errorNode);
+                                return noCache ? iterationTypes : setCachedIterationTypes(type, "iterationTypesOfAsyncIterable", iterationTypes);
+                            }
+                        }
+                        else {
+                            return iterationTypes;
+                        }
                     }
                 }
             }
 
             if (use & IterationUse.AllowsAsyncIterablesFlag) {
-                const iterationTypes = getIterationTypesOfIterableSlow(type, asyncIterationTypesResolver, errorNode);
+                const iterationTypes = getIterationTypesOfIterableSlow(type, asyncIterationTypesResolver, errorNode, errorOutputContainer, noCache);
                 if (iterationTypes !== noIterationTypes) {
                     return iterationTypes;
                 }
             }
 
             if (use & IterationUse.AllowsSyncIterablesFlag) {
-                const iterationTypes = getIterationTypesOfIterableSlow(type, syncIterationTypesResolver, errorNode);
+                let iterationTypes = getIterationTypesOfIterableSlow(type, syncIterationTypesResolver, errorNode, errorOutputContainer, noCache);
                 if (iterationTypes !== noIterationTypes) {
                     if (use & IterationUse.AllowsAsyncIterablesFlag) {
-                        return setCachedIterationTypes(type, "iterationTypesOfAsyncIterable", iterationTypes
-                            ? getAsyncFromSyncIterationTypes(iterationTypes, errorNode)
-                            : noIterationTypes);
+                        iterationTypes = getAsyncFromSyncIterationTypes(iterationTypes, errorNode);
+                        return noCache ? iterationTypes : setCachedIterationTypes(type, "iterationTypesOfAsyncIterable", iterationTypes);
                     }
                     else {
                         return iterationTypes;
@@ -38950,7 +39025,7 @@ namespace ts {
         function getIterationTypesOfGlobalIterableType(globalType: Type, resolver: IterationTypesResolver) {
             const globalIterationTypes =
                 getIterationTypesOfIterableCached(globalType, resolver) ||
-                getIterationTypesOfIterableSlow(globalType, resolver, /*errorNode*/ undefined);
+                getIterationTypesOfIterableSlow(globalType, resolver, /*errorNode*/ undefined, /*errorOutputContainer*/ undefined, /*noCache*/ false);
             return globalIterationTypes === noIterationTypes ? defaultIterationTypes : globalIterationTypes;
         }
 
@@ -39008,28 +39083,28 @@ namespace ts {
          * NOTE: You probably don't want to call this directly and should be calling
          * `getIterationTypesOfIterable` instead.
          */
-        function getIterationTypesOfIterableSlow(type: Type, resolver: IterationTypesResolver, errorNode: Node | undefined) {
+        function getIterationTypesOfIterableSlow(type: Type, resolver: IterationTypesResolver, errorNode: Node | undefined, errorOutputContainer: { errors: Diagnostic[] | undefined } | undefined, noCache: boolean) {
             const method = getPropertyOfType(type, getPropertyNameForKnownSymbolName(resolver.iteratorSymbolName));
             const methodType = method && !(method.flags & SymbolFlags.Optional) ? getTypeOfSymbol(method) : undefined;
             if (isTypeAny(methodType)) {
-                return setCachedIterationTypes(type, resolver.iterableCacheKey, anyIterationTypes);
+                return noCache ? anyIterationTypes : setCachedIterationTypes(type, resolver.iterableCacheKey, anyIterationTypes);
             }
 
             const signatures = methodType ? getSignaturesOfType(methodType, SignatureKind.Call) : undefined;
             if (!some(signatures)) {
-                return setCachedIterationTypes(type, resolver.iterableCacheKey, noIterationTypes);
+                return noCache ? noIterationTypes : setCachedIterationTypes(type, resolver.iterableCacheKey, noIterationTypes);
             }
 
             const iteratorType = getIntersectionType(map(signatures, getReturnTypeOfSignature));
-            const iterationTypes = getIterationTypesOfIterator(iteratorType, resolver, errorNode) ?? noIterationTypes;
-            return setCachedIterationTypes(type, resolver.iterableCacheKey, iterationTypes);
+            const iterationTypes = getIterationTypesOfIteratorWorker(iteratorType, resolver, errorNode, errorOutputContainer, noCache) ?? noIterationTypes;
+            return noCache ? iterationTypes : setCachedIterationTypes(type, resolver.iterableCacheKey, iterationTypes);
         }
 
-        function reportTypeNotIterableError(errorNode: Node, type: Type, allowAsyncIterables: boolean): void {
+        function reportTypeNotIterableError(errorNode: Node, type: Type, allowAsyncIterables: boolean): Diagnostic {
             const message = allowAsyncIterables
                 ? Diagnostics.Type_0_must_have_a_Symbol_asyncIterator_method_that_returns_an_async_iterator
                 : Diagnostics.Type_0_must_have_a_Symbol_iterator_method_that_returns_an_iterator;
-            errorAndMaybeSuggestAwait(errorNode, !!getAwaitedTypeOfPromise(type), message, typeToString(type));
+            return errorAndMaybeSuggestAwait(errorNode, !!getAwaitedTypeOfPromise(type), message, typeToString(type));
         }
 
         /**
@@ -39038,15 +39113,34 @@ namespace ts {
          * If we successfully found the *yield*, *return*, and *next* types, an `IterationTypes`
          * record is returned. Otherwise, `undefined` is returned.
          */
-        function getIterationTypesOfIterator(type: Type, resolver: IterationTypesResolver, errorNode: Node | undefined) {
+        function getIterationTypesOfIterator(type: Type, resolver: IterationTypesResolver, errorNode: Node | undefined, errorOutputContainer: { errors: Diagnostic[] | undefined } | undefined) {
+            return getIterationTypesOfIteratorWorker(type, resolver, errorNode, errorOutputContainer, /*noCache*/ false);
+        }
+
+        /**
+         * Gets the *yield*, *return*, and *next* types from an `Iterator`-like or `AsyncIterator`-like type.
+         *
+         * If we successfully found the *yield*, *return*, and *next* types, an `IterationTypes`
+         * record is returned. Otherwise, `undefined` is returned.
+         *
+         * NOTE: You probably don't want to call this directly and should be calling
+         * `getIterationTypesOfIterator` instead.
+         */
+        function getIterationTypesOfIteratorWorker(type: Type, resolver: IterationTypesResolver, errorNode: Node | undefined, errorOutputContainer: { errors: Diagnostic[] | undefined } | undefined, noCache: boolean) {
             if (isTypeAny(type)) {
                 return anyIterationTypes;
             }
 
-            const iterationTypes =
+            let iterationTypes =
                 getIterationTypesOfIteratorCached(type, resolver) ||
-                getIterationTypesOfIteratorFast(type, resolver) ||
-                getIterationTypesOfIteratorSlow(type, resolver, errorNode);
+                getIterationTypesOfIteratorFast(type, resolver);
+
+            if (iterationTypes === noIterationTypes && errorNode) {
+                iterationTypes = undefined;
+                noCache = true;
+            }
+
+            iterationTypes ??= getIterationTypesOfIteratorSlow(type, resolver, errorNode, errorOutputContainer, noCache);
             return iterationTypes === noIterationTypes ? undefined : iterationTypes;
         }
 
@@ -39087,7 +39181,7 @@ namespace ts {
                 // and `undefined` in our libs by default, a custom lib *could* use different definitions.
                 const globalIterationTypes =
                     getIterationTypesOfIteratorCached(globalType, resolver) ||
-                    getIterationTypesOfIteratorSlow(globalType, resolver, /*errorNode*/ undefined);
+                    getIterationTypesOfIteratorSlow(globalType, resolver, /*errorNode*/ undefined, /*errorOutputContainer*/ undefined, /*noCache*/ false);
                 const { returnType, nextType } = globalIterationTypes === noIterationTypes ? defaultIterationTypes : globalIterationTypes;
                 return setCachedIterationTypes(type, resolver.iteratorCacheKey, createIterationTypes(yieldType, returnType, nextType));
             }
@@ -39168,7 +39262,7 @@ namespace ts {
          * If we successfully found the *yield*, *return*, and *next* types, an `IterationTypes`
          * record is returned. Otherwise, we return `undefined`.
          */
-        function getIterationTypesOfMethod(type: Type, resolver: IterationTypesResolver, methodName: "next" | "return" | "throw", errorNode: Node | undefined): IterationTypes | undefined {
+        function getIterationTypesOfMethod(type: Type, resolver: IterationTypesResolver, methodName: "next" | "return" | "throw", errorNode: Node | undefined, errorOutputContainer: { errors: Diagnostic[] | undefined } | undefined): IterationTypes | undefined {
             const method = getPropertyOfType(type, methodName as __String);
 
             // Ignore 'return' or 'throw' if they are missing.
@@ -39192,9 +39286,15 @@ namespace ts {
                     const diagnostic = methodName === "next"
                         ? resolver.mustHaveANextMethodDiagnostic
                         : resolver.mustBeAMethodDiagnostic;
-                    error(errorNode, diagnostic, methodName);
+                    if (errorOutputContainer) {
+                        errorOutputContainer.errors ??= [];
+                        errorOutputContainer.errors.push(createDiagnosticForNode(errorNode, diagnostic, methodName));
+                    }
+                    else {
+                        error(errorNode, diagnostic, methodName);
+                    }
                 }
-                return methodName === "next" ? anyIterationTypes : undefined;
+                return methodName === "next" ? noIterationTypes : undefined;
             }
 
             // If the method signature comes exclusively from the global iterator or generator type,
@@ -39253,7 +39353,13 @@ namespace ts {
             const iterationTypes = getIterationTypesOfIteratorResult(resolvedMethodReturnType);
             if (iterationTypes === noIterationTypes) {
                 if (errorNode) {
-                    error(errorNode, resolver.mustHaveAValueDiagnostic, methodName);
+                    if (errorOutputContainer) {
+                        errorOutputContainer.errors ??= [];
+                        errorOutputContainer.errors.push(createDiagnosticForNode(errorNode, resolver.mustHaveAValueDiagnostic, methodName));
+                    }
+                    else {
+                        error(errorNode, resolver.mustHaveAValueDiagnostic, methodName);
+                    }
                 }
                 yieldType = anyType;
                 returnTypes = append(returnTypes, anyType);
@@ -39276,13 +39382,13 @@ namespace ts {
          * NOTE: You probably don't want to call this directly and should be calling
          * `getIterationTypesOfIterator` instead.
          */
-        function getIterationTypesOfIteratorSlow(type: Type, resolver: IterationTypesResolver, errorNode: Node | undefined) {
+        function getIterationTypesOfIteratorSlow(type: Type, resolver: IterationTypesResolver, errorNode: Node | undefined, errorOutputContainer: { errors: Diagnostic[] | undefined } | undefined, noCache: boolean) {
             const iterationTypes = combineIterationTypes([
-                getIterationTypesOfMethod(type, resolver, "next", errorNode),
-                getIterationTypesOfMethod(type, resolver, "return", errorNode),
-                getIterationTypesOfMethod(type, resolver, "throw", errorNode),
+                getIterationTypesOfMethod(type, resolver, "next", errorNode, errorOutputContainer),
+                getIterationTypesOfMethod(type, resolver, "return", errorNode, errorOutputContainer),
+                getIterationTypesOfMethod(type, resolver, "throw", errorNode, errorOutputContainer),
             ]);
-            return setCachedIterationTypes(type, resolver.iteratorCacheKey, iterationTypes);
+            return noCache ? iterationTypes : setCachedIterationTypes(type, resolver.iteratorCacheKey, iterationTypes);
         }
 
         /**
@@ -39307,7 +39413,7 @@ namespace ts {
             const use = isAsyncGenerator ? IterationUse.AsyncGeneratorReturnType : IterationUse.GeneratorReturnType;
             const resolver = isAsyncGenerator ? asyncIterationTypesResolver : syncIterationTypesResolver;
             return getIterationTypesOfIterable(type, use, /*errorNode*/ undefined) ||
-                getIterationTypesOfIterator(type, resolver, /*errorNode*/ undefined);
+                getIterationTypesOfIterator(type, resolver, /*errorNode*/ undefined, /*errorOutputContainer*/ undefined);
         }
 
         function checkBreakOrContinueStatement(node: BreakOrContinueStatement) {
