@@ -18493,7 +18493,7 @@ namespace ts {
             if (reduced !== type) {
                 return reduced;
             }
-            if (type.flags & TypeFlags.Intersection) {
+            if (type.flags & TypeFlags.Intersection && some((type as IntersectionType).types, isEmptyAnonymousObjectType)) {
                 const normalizedTypes = sameMap(type.types, t => getNormalizedType(t, writing));
                 if (normalizedTypes !== type.types) {
                     return getIntersectionType(normalizedTypes);
@@ -25328,11 +25328,19 @@ namespace ts {
                 }
                 const target = getReferenceCandidate(typeOfExpr.expression);
                 if (!isMatchingReference(reference, target)) {
+                    const propertyAccess = getDiscriminantPropertyAccess(typeOfExpr.expression, type);
+                    if (propertyAccess) {
+                        return narrowTypeByDiscriminant(type, propertyAccess, t => narrowTypeByLiteralExpression(t, literal, assumeTrue));
+                    }
                     if (strictNullChecks && optionalChainContainsReference(target, reference) && assumeTrue === (literal.text !== "undefined")) {
                         return getAdjustedTypeWithFacts(type, TypeFacts.NEUndefinedOrNull);
                     }
                     return type;
                 }
+                return narrowTypeByLiteralExpression(type, literal, assumeTrue);
+            }
+
+            function narrowTypeByLiteralExpression(type: Type, literal: LiteralExpression, assumeTrue: boolean) {
                 return assumeTrue ?
                     narrowTypeByTypeName(type, literal.text) :
                     getTypeWithFacts(type, typeofNEFacts.get(literal.text) || TypeFacts.TypeofNEHostObject);
