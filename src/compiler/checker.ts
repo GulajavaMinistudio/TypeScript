@@ -15166,7 +15166,7 @@ namespace ts {
                 return includes & TypeFlags.IncludesWildcard ? wildcardType : anyType;
             }
             if (!strictNullChecks && includes & TypeFlags.Nullable) {
-                return includes & TypeFlags.Undefined ? undefinedType : nullType;
+                return includes & TypeFlags.IncludesEmptyObject ? neverType : includes & TypeFlags.Undefined ? undefinedType : nullType;
             }
             if (includes & TypeFlags.String && includes & (TypeFlags.StringLiteral | TypeFlags.TemplateLiteral | TypeFlags.StringMapping) ||
                 includes & TypeFlags.Number && includes & TypeFlags.NumberLiteral ||
@@ -15906,7 +15906,7 @@ namespace ts {
             // (T | U)[K] -> T[K] | U[K] (reading)
             // (T | U)[K] -> T[K] & U[K] (writing)
             // (T & U)[K] -> T[K] & U[K]
-            if (objectType.flags & TypeFlags.UnionOrIntersection) {
+            if (objectType.flags & TypeFlags.Union || objectType.flags & TypeFlags.Intersection && !shouldDeferIndexType(objectType)) {
                 const types = map((objectType as UnionOrIntersectionType).types, t => getSimplifiedType(getIndexedAccessType(t, indexType), writing));
                 return objectType.flags & TypeFlags.Intersection || writing ? getIntersectionType(types) : getUnionType(types);
             }
@@ -25096,7 +25096,7 @@ namespace ts {
                 const narrowedPropType = narrowType(propType);
                 return filterType(type, t => {
                     const discriminantType = getTypeOfPropertyOrIndexSignature(t, propName);
-                    return !(narrowedPropType.flags & TypeFlags.Never) && isTypeComparableTo(narrowedPropType, discriminantType);
+                    return !(narrowedPropType.flags & TypeFlags.Never) && areTypesComparable(narrowedPropType, discriminantType);
                 });
             }
 
@@ -25150,7 +25150,7 @@ namespace ts {
 
             function narrowByInKeyword(type: Type, name: __String, assumeTrue: boolean) {
                 if (type.flags & TypeFlags.Union
-                    || type.flags & TypeFlags.Object && declaredType !== type
+                    || type.flags & TypeFlags.Object && declaredType !== type && !(declaredType === unknownType && isEmptyAnonymousObjectType(type))
                     || isThisTypeParameter(type)
                     || type.flags & TypeFlags.Intersection && every((type as IntersectionType).types, t => t.symbol !== globalThisSymbol)) {
                     return filterType(type, t => isTypePresencePossible(t, name, assumeTrue));
@@ -25288,14 +25288,19 @@ namespace ts {
                     assumeTrue = !assumeTrue;
                 }
                 const valueType = getTypeOfExpression(value);
-                if ((type.flags & TypeFlags.Unknown) && assumeTrue && (operator === SyntaxKind.EqualsEqualsEqualsToken || operator === SyntaxKind.ExclamationEqualsEqualsToken)) {
+                if (((type.flags & TypeFlags.Unknown) || isEmptyAnonymousObjectType(type) && !(valueType.flags & TypeFlags.Nullable)) &&
+                    assumeTrue &&
+                    (operator === SyntaxKind.EqualsEqualsEqualsToken || operator === SyntaxKind.ExclamationEqualsEqualsToken)
+                ) {
                     if (valueType.flags & (TypeFlags.Primitive | TypeFlags.NonPrimitive)) {
                         return valueType;
                     }
                     if (valueType.flags & TypeFlags.Object) {
                         return nonPrimitiveType;
                     }
-                    return type;
+                    if (type.flags & TypeFlags.Unknown) {
+                        return type;
+                    }
                 }
                 if (valueType.flags & TypeFlags.Nullable) {
                     if (!strictNullChecks) {
@@ -28375,6 +28380,7 @@ namespace ts {
          */
         function createJsxAttributesTypeFromAttributesProperty(openingLikeElement: JsxOpeningLikeElement, checkMode: CheckMode | undefined) {
             const attributes = openingLikeElement.attributes;
+            const attributesType = getContextualType(attributes, ContextFlags.None);
             const allAttributesTable = strictNullChecks ? createSymbolTable() : undefined;
             let attributesTable = createSymbolTable();
             let spread: Type = emptyJsxObjectType;
@@ -28402,6 +28408,12 @@ namespace ts {
                     allAttributesTable?.set(attributeSymbol.escapedName, attributeSymbol);
                     if (attributeDecl.name.escapedText === jsxChildrenPropertyName) {
                         explicitlySpecifyChildrenAttribute = true;
+                    }
+                    if (attributesType) {
+                        const prop = getPropertyOfType(attributesType, member.escapedName);
+                        if (prop && prop.declarations && isDeprecatedSymbol(prop)) {
+                            addDeprecatedSuggestion(attributeDecl.name, prop.declarations, attributeDecl.name.escapedText as string);
+                        }
                     }
                 }
                 else {
