@@ -6116,29 +6116,19 @@ namespace ts {
                 return parameterNode;
 
                 function cloneBindingName(node: BindingName): BindingName {
-                    return elideInitializerAndPropertyRenamingAndSetEmitFlags(node) as BindingName;
-                    function elideInitializerAndPropertyRenamingAndSetEmitFlags(node: Node): Node {
+                    return elideInitializerAndSetEmitFlags(node) as BindingName;
+                    function elideInitializerAndSetEmitFlags(node: Node): Node {
                         if (context.tracker.trackSymbol && isComputedPropertyName(node) && isLateBindableName(node)) {
                             trackComputedName(node.expression, context.enclosingDeclaration, context);
                         }
-                        let visited = visitEachChild(node, elideInitializerAndPropertyRenamingAndSetEmitFlags, nullTransformationContext, /*nodesVisitor*/ undefined, elideInitializerAndPropertyRenamingAndSetEmitFlags)!;
+                        let visited = visitEachChild(node, elideInitializerAndSetEmitFlags, nullTransformationContext, /*nodesVisitor*/ undefined, elideInitializerAndSetEmitFlags)!;
                         if (isBindingElement(visited)) {
-                            if (visited.propertyName && isIdentifier(visited.propertyName) && isIdentifier(visited.name) && !isStringAKeyword(idText(visited.propertyName))) {
-                                visited = factory.updateBindingElement(
-                                    visited,
-                                    visited.dotDotDotToken,
-                                    /* propertyName*/ undefined,
-                                    visited.propertyName,
-                                    /*initializer*/ undefined);
-                            }
-                            else {
-                                visited = factory.updateBindingElement(
-                                    visited,
-                                    visited.dotDotDotToken,
-                                    visited.propertyName,
-                                    visited.name,
-                                    /*initializer*/ undefined);
-                            }
+                            visited = factory.updateBindingElement(
+                                visited,
+                                visited.dotDotDotToken,
+                                visited.propertyName,
+                                visited.name,
+                                /*initializer*/ undefined);
                         }
                         if (!nodeIsSynthesized(visited)) {
                             visited = factory.cloneNode(visited);
@@ -19216,11 +19206,15 @@ namespace ts {
                 // parameter 'T extends 1 | 2', the intersection 'T & 1' should be reduced to '1' such that it doesn't
                 // appear to be comparable to '2'.
                 if (relation === comparableRelation && target.flags & TypeFlags.Primitive) {
-                    const constraints = sameMap((source as IntersectionType).types, getBaseConstraintOrType);
+                    const constraints = sameMap((source as IntersectionType).types, t => t.flags & TypeFlags.Instantiable ? getBaseConstraintOfType(t) || unknownType : t);
                     if (constraints !== (source as IntersectionType).types) {
                         source = getIntersectionType(constraints);
+                        if (source.flags & TypeFlags.Never) {
+                            return Ternary.False;
+                        }
                         if (!(source.flags & TypeFlags.Intersection)) {
-                            return isRelatedTo(source, target, RecursionFlags.Source, /*reportErrors*/ false);
+                            return isRelatedTo(source, target, RecursionFlags.Source, /*reportErrors*/ false) ||
+                                isRelatedTo(target, source, RecursionFlags.Source, /*reportErrors*/ false);
                         }
                     }
                 }
@@ -19541,7 +19535,7 @@ namespace ts {
                     // the type param can be compared with itself in the target (with the influence of its constraint to match other parts)
                     // For example, if `T extends 1 | 2` and `U extends 2 | 3` and we compare `T & U` to `T & U & (1 | 2 | 3)`
                     const constraint = getEffectiveConstraintOfIntersection(source.flags & TypeFlags.Intersection ? (source as IntersectionType).types: [source], !!(target.flags & TypeFlags.Union));
-                    if (constraint && everyType(constraint, c => c !== source)) { // Skip comparison if expansion contains the source itself
+                    if (constraint && !(constraint.flags & TypeFlags.Never) && everyType(constraint, c => c !== source)) { // Skip comparison if expansion contains the source itself
                         // TODO: Stack errors so we get a pyramid for the "normal" comparison above, _and_ a second for this
                         result = isRelatedTo(constraint, target, RecursionFlags.Source, /*reportErrors*/ false, /*headMessage*/ undefined, intersectionState);
                     }
@@ -25322,25 +25316,11 @@ namespace ts {
                     assumeTrue = !assumeTrue;
                 }
                 const valueType = getTypeOfExpression(value);
-                if (((type.flags & TypeFlags.Unknown) || isEmptyAnonymousObjectType(type) && !(valueType.flags & TypeFlags.Nullable)) &&
-                    assumeTrue &&
-                    (operator === SyntaxKind.EqualsEqualsEqualsToken || operator === SyntaxKind.ExclamationEqualsEqualsToken)
-                ) {
-                    if (valueType.flags & (TypeFlags.Primitive | TypeFlags.NonPrimitive)) {
-                        return valueType;
-                    }
-                    if (valueType.flags & TypeFlags.Object) {
-                        return nonPrimitiveType;
-                    }
-                    if (type.flags & TypeFlags.Unknown) {
-                        return type;
-                    }
-                }
+                const doubleEquals = operator === SyntaxKind.EqualsEqualsToken || operator === SyntaxKind.ExclamationEqualsToken;
                 if (valueType.flags & TypeFlags.Nullable) {
                     if (!strictNullChecks) {
                         return type;
                     }
-                    const doubleEquals = operator === SyntaxKind.EqualsEqualsToken || operator === SyntaxKind.ExclamationEqualsToken;
                     const facts = doubleEquals ?
                         assumeTrue ? TypeFacts.EQUndefinedOrNull : TypeFacts.NEUndefinedOrNull :
                         valueType.flags & TypeFlags.Null ?
@@ -25349,10 +25329,16 @@ namespace ts {
                     return getAdjustedTypeWithFacts(type, facts);
                 }
                 if (assumeTrue) {
-                    const filterFn: (t: Type) => boolean = operator === SyntaxKind.EqualsEqualsToken ?
-                        t => areTypesComparable(t, valueType) || isCoercibleUnderDoubleEquals(t, valueType) :
-                        t => areTypesComparable(t, valueType);
-                    return replacePrimitivesWithLiterals(filterType(type, filterFn), valueType);
+                    if (!doubleEquals && (type.flags & TypeFlags.Unknown || someType(type, isEmptyAnonymousObjectType))) {
+                        if (valueType.flags & (TypeFlags.Primitive | TypeFlags.NonPrimitive) || isEmptyAnonymousObjectType(valueType)) {
+                            return valueType;
+                        }
+                        if (valueType.flags & TypeFlags.Object) {
+                            return nonPrimitiveType;
+                        }
+                    }
+                    const filteredType = filterType(type, t => areTypesComparable(t, valueType) || doubleEquals && isCoercibleUnderDoubleEquals(t, valueType));
+                    return replacePrimitivesWithLiterals(filteredType, valueType);
                 }
                 if (isUnitType(valueType)) {
                     return filterType(type, t => !(isUnitLikeType(t) && areTypesComparable(t, valueType)));
@@ -29186,11 +29172,30 @@ namespace ts {
         }
 
         function reportObjectPossiblyNullOrUndefinedError(node: Node, facts: TypeFacts) {
-            error(node, facts & TypeFacts.IsUndefined ? facts & TypeFacts.IsNull ?
-                Diagnostics.Object_is_possibly_null_or_undefined :
-                Diagnostics.Object_is_possibly_undefined :
-                Diagnostics.Object_is_possibly_null
-            );
+            const nodeText = isEntityNameExpression(node) ? entityNameToString(node) : undefined;
+            if (node.kind === SyntaxKind.NullKeyword) {
+                error(node, Diagnostics.The_value_0_cannot_be_used_here, "null");
+                return;
+            }
+            if (nodeText !== undefined && nodeText.length < 100) {
+                if (isIdentifier(node) && nodeText === "undefined") {
+                    error(node, Diagnostics.The_value_0_cannot_be_used_here, "undefined");
+                    return;
+                }
+                error(node, facts & TypeFacts.IsUndefined ? facts & TypeFacts.IsNull ?
+                    Diagnostics._0_is_possibly_null_or_undefined :
+                    Diagnostics._0_is_possibly_undefined :
+                    Diagnostics._0_is_possibly_null,
+                    nodeText
+                );
+            }
+            else {
+                error(node, facts & TypeFacts.IsUndefined ? facts & TypeFacts.IsNull ?
+                    Diagnostics.Object_is_possibly_null_or_undefined :
+                    Diagnostics.Object_is_possibly_undefined :
+                    Diagnostics.Object_is_possibly_null
+                );
+            }
         }
 
         function reportCannotInvokePossiblyNullOrUndefinedError(node: Node, facts: TypeFacts) {
@@ -29207,6 +29212,13 @@ namespace ts {
             reportError: (node: Node, facts: TypeFacts) => void
         ): Type {
             if (strictNullChecks && type.flags & TypeFlags.Unknown) {
+                if (isEntityNameExpression(node)) {
+                    const nodeText = entityNameToString(node);
+                    if (nodeText.length < 100) {
+                        error(node, Diagnostics._0_is_of_type_unknown, nodeText);
+                        return errorType;
+                    }
+                }
                 error(node, Diagnostics.Object_is_of_type_unknown);
                 return errorType;
             }
@@ -29226,6 +29238,17 @@ namespace ts {
         function checkNonNullNonVoidType(type: Type, node: Node): Type {
             const nonNullType = checkNonNullType(type, node);
             if (nonNullType.flags & TypeFlags.Void) {
+                if (isEntityNameExpression(node)) {
+                    const nodeText = entityNameToString(node);
+                    if (isIdentifier(node) && nodeText === "undefined") {
+                        error(node, Diagnostics.The_value_0_cannot_be_used_here, nodeText);
+                        return nonNullType;
+                    }
+                    if (nodeText.length < 100) {
+                        error(node, Diagnostics._0_is_possibly_undefined, nodeText);
+                        return nonNullType;
+                    }
+                }
                 error(node, Diagnostics.Object_is_possibly_undefined);
             }
             return nonNullType;
