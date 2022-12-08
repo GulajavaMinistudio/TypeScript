@@ -1813,6 +1813,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     const unresolvedSymbols = new Map<string, TransientSymbol>();
     const errorTypes = new Map<string, Type>();
 
+    // We specifically create the `undefined` and `null` types before any other types that can occur in
+    // unions such that they are given low type IDs and occur first in the sorted list of union constituents.
+    // We can then just examine the first constituent(s) of a union to check for their presence.
+
     const anyType = createIntrinsicType(TypeFlags.Any, "any");
     const autoType = createIntrinsicType(TypeFlags.Any, "any", ObjectFlags.NonInferrableType);
     const wildcardType = createIntrinsicType(TypeFlags.Any, "any");
@@ -1824,8 +1828,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     const nonNullUnknownType = createIntrinsicType(TypeFlags.Unknown, "unknown");
     const undefinedType = createIntrinsicType(TypeFlags.Undefined, "undefined");
     const undefinedWideningType = strictNullChecks ? undefinedType : createIntrinsicType(TypeFlags.Undefined, "undefined", ObjectFlags.ContainsWideningType);
+    const missingType = createIntrinsicType(TypeFlags.Undefined, "undefined");
+    const undefinedOrMissingType = exactOptionalPropertyTypes ? missingType : undefinedType;
     const optionalType = createIntrinsicType(TypeFlags.Undefined, "undefined");
-    const missingType = exactOptionalPropertyTypes ? createIntrinsicType(TypeFlags.Undefined, "undefined") : undefinedType;
     const nullType = createIntrinsicType(TypeFlags.Null, "null");
     const nullWideningType = strictNullChecks ? nullType : createIntrinsicType(TypeFlags.Null, "null", ObjectFlags.ContainsWideningType);
     const stringType = createIntrinsicType(TypeFlags.String, "string");
@@ -15020,8 +15025,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function getSubstitutionType(baseType: Type, constraint: Type) {
-        if (constraint.flags & TypeFlags.AnyOrUnknown || constraint === baseType ||
-            !isGenericType(baseType) && !isGenericType(constraint)) {
+        if (constraint.flags & TypeFlags.AnyOrUnknown || constraint === baseType) {
             return baseType;
         }
         const id = `${getTypeId(baseType)}>${getTypeId(constraint)}`;
@@ -15953,10 +15957,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     includes & TypeFlags.IncludesWildcard ? wildcardType : anyType :
                     includes & TypeFlags.Null || containsType(typeSet, unknownType) ? unknownType : nonNullUnknownType;
             }
-            if (exactOptionalPropertyTypes && includes & TypeFlags.Undefined) {
-                const missingIndex = binarySearch(typeSet, missingType, getTypeId, compareValues);
-                if (missingIndex >= 0 && containsType(typeSet, undefinedType)) {
-                    orderedRemoveItemAt(typeSet, missingIndex);
+            if (includes & TypeFlags.Undefined) {
+                // If type set contains both undefinedType and missingType, remove missingType
+                if (typeSet.length >= 2 && typeSet[0] === undefinedType && typeSet[1] === missingType) {
+                    orderedRemoveItemAt(typeSet, 1);
                 }
             }
             if (includes & (TypeFlags.Literal | TypeFlags.UniqueESSymbol | TypeFlags.TemplateLiteral | TypeFlags.StringMapping) || includes & TypeFlags.Void && includes & TypeFlags.Undefined) {
@@ -16097,7 +16101,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 if (type === wildcardType) includes |= TypeFlags.IncludesWildcard;
             }
             else if (strictNullChecks || !(flags & TypeFlags.Nullable)) {
-                if (exactOptionalPropertyTypes && type === missingType) {
+                if (type === missingType) {
                     includes |= TypeFlags.IncludesMissingType;
                     type = undefinedType;
                 }
@@ -16321,9 +16325,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     result = getIntersectionType(typeSet, aliasSymbol, aliasTypeArguments);
                 }
                 else if (eachIsUnionContaining(typeSet, TypeFlags.Undefined)) {
-                    const undefinedOrMissingType = exactOptionalPropertyTypes && some(typeSet, t => containsType((t as UnionType).types, missingType)) ? missingType : undefinedType;
+                    const containedUndefinedType = some(typeSet, containsMissingType) ? missingType : undefinedType;
                     removeFromEach(typeSet, TypeFlags.Undefined);
-                    result = getUnionType([getIntersectionType(typeSet), undefinedOrMissingType], UnionReduction.Literal, aliasSymbol, aliasTypeArguments);
+                    result = getUnionType([getIntersectionType(typeSet), containedUndefinedType], UnionReduction.Literal, aliasSymbol, aliasTypeArguments);
                 }
                 else if (eachIsUnionContaining(typeSet, TypeFlags.Null)) {
                     removeFromEach(typeSet, TypeFlags.Null);
@@ -16854,7 +16858,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     errorIfWritingToReadonlyIndex(getIndexInfoOfType(objectType, numberType));
                     return mapType(objectType, t => {
                         const restType = getRestTypeOfTupleType(t as TupleTypeReference) || undefinedType;
-                        return accessFlags & AccessFlags.IncludeUndefined ? getUnionType([restType, undefinedType]) : restType;
+                        return accessFlags & AccessFlags.IncludeUndefined ? getUnionType([restType, missingType]) : restType;
                     });
                 }
             }
@@ -16876,7 +16880,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 if (accessNode && indexInfo.keyType === stringType && !isTypeAssignableToKind(indexType, TypeFlags.String | TypeFlags.Number)) {
                     const indexNode = getIndexNodeForAccessExpression(accessNode);
                     error(indexNode, Diagnostics.Type_0_cannot_be_used_as_an_index_type, typeToString(indexType));
-                    return accessFlags & AccessFlags.IncludeUndefined ? getUnionType([indexInfo.type, undefinedType]) : indexInfo.type;
+                    return accessFlags & AccessFlags.IncludeUndefined ? getUnionType([indexInfo.type, missingType]) : indexInfo.type;
                 }
                 errorIfWritingToReadonlyIndex(indexInfo);
                 // When accessing an enum object with its own type,
@@ -16888,7 +16892,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                         (indexType.symbol &&
                         indexType.flags & TypeFlags.EnumLiteral &&
                         getParentOfSymbol(indexType.symbol) === objectType.symbol))) {
-                    return getUnionType([indexInfo.type, undefinedType]);
+                    return getUnionType([indexInfo.type, missingType]);
                 }
                 return indexInfo.type;
             }
@@ -20422,8 +20426,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
 
         function getUndefinedStrippedTargetIfNeeded(source: Type, target: Type) {
-            // As a builtin type, `undefined` is a very low type ID - making it almsot always first, making this a very fast check to see
-            // if we need to strip `undefined` from the target
             if (source.flags & TypeFlags.Union && target.flags & TypeFlags.Union &&
                 !((source as UnionType).types[0].flags & TypeFlags.Undefined) && (target as UnionType).types[0].flags & TypeFlags.Undefined) {
                 return extractTypesOfKind(target, ~TypeFlags.Undefined);
@@ -22791,8 +22793,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
     function getOptionalType(type: Type, isProperty = false): Type {
         Debug.assert(strictNullChecks);
-        const missingOrUndefined = isProperty ? missingType : undefinedType;
-        return type.flags & TypeFlags.Undefined || type.flags & TypeFlags.Union && (type as UnionType).types[0] === missingOrUndefined ? type : getUnionType([type, missingOrUndefined]);
+        const missingOrUndefined = isProperty ? undefinedOrMissingType : undefinedType;
+        return type === missingOrUndefined || type.flags & TypeFlags.Union && (type as UnionType).types[0] === missingOrUndefined ? type : getUnionType([type, missingOrUndefined]);
     }
 
     function getGlobalNonNullableTypeInstantiation(type: Type) {
@@ -22831,7 +22833,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function containsMissingType(type: Type) {
-        return exactOptionalPropertyTypes && (type === missingType || type.flags & TypeFlags.Union && containsType((type as UnionType).types, missingType));
+        return type === missingType || !!(type.flags & TypeFlags.Union) && (type as UnionType).types[0] === missingType;
     }
 
     function removeMissingOrUndefinedType(type: Type): Type {
@@ -22984,7 +22986,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         if (cached) {
             return cached;
         }
-        const result = createSymbolWithType(prop, missingType);
+        const result = createSymbolWithType(prop, undefinedOrMissingType);
         result.flags |= SymbolFlags.Optional;
         undefinedProperties.set(prop.escapedName, result);
         return result;
@@ -24389,7 +24391,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function isTypeOrBaseIdenticalTo(s: Type, t: Type) {
-        return exactOptionalPropertyTypes && t === missingType ? s === t :
+        return t === missingType ? s === t :
             (isTypeIdenticalTo(s, t) || !!(t.flags & TypeFlags.String && s.flags & TypeFlags.StringLiteral || t.flags & TypeFlags.Number && s.flags & TypeFlags.NumberLiteral));
     }
 
@@ -25073,7 +25075,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     function includeUndefinedInIndexSignature(type: Type | undefined): Type | undefined {
         if (!type) return type;
         return compilerOptions.noUncheckedIndexedAccess ?
-            getUnionType([type, undefinedType]) :
+            getUnionType([type, missingType]) :
             type;
     }
 
@@ -26071,7 +26073,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 // If the bypass flow contributes a type we haven't seen yet and the switch statement
                 // isn't exhaustive, process the bypass flow type. Since exhaustiveness checks increase
                 // the risk of circularities, we only want to perform them when they make a difference.
-                if (!contains(antecedentTypes, type) && !isExhaustiveSwitchStatement(bypassFlow.switchStatement)) {
+                if (!(type.flags & TypeFlags.Never) && !contains(antecedentTypes, type) && !isExhaustiveSwitchStatement(bypassFlow.switchStatement)) {
                     if (type === declaredType && declaredType === initialType) {
                         return type;
                     }
@@ -29097,7 +29099,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             }
             else if (exactOptionalPropertyTypes && e.kind === SyntaxKind.OmittedExpression) {
                 hasOmittedExpression = true;
-                elementTypes.push(missingType);
+                elementTypes.push(undefinedOrMissingType);
                 elementFlags.push(ElementFlags.Optional);
             }
             else {
@@ -30641,7 +30643,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 error(node, Diagnostics.Index_signature_in_type_0_only_permits_reading, typeToString(apparentType));
             }
 
-            propType = (compilerOptions.noUncheckedIndexedAccess && !isAssignmentTarget(node)) ? getUnionType([indexInfo.type, undefinedType]) : indexInfo.type;
+            propType = (compilerOptions.noUncheckedIndexedAccess && !isAssignmentTarget(node)) ? getUnionType([indexInfo.type, missingType]) : indexInfo.type;
             if (compilerOptions.noPropertyAccessFromIndexSignature && isPropertyAccessExpression(node)) {
                 error(right, Diagnostics.Property_0_comes_from_an_index_signature_so_it_must_be_accessed_with_0, unescapeLeadingUnderscores(right.escapedText));
             }
@@ -33610,6 +33612,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
     function checkExpressionWithTypeArguments(node: ExpressionWithTypeArguments | TypeQueryNode) {
         checkGrammarExpressionWithTypeArguments(node);
+        forEach(node.typeArguments, checkSourceElement);
         const exprType = node.kind === SyntaxKind.ExpressionWithTypeArguments ? checkExpression(node.expression) :
             isThisIdentifier(node.exprName) ? checkThisExpression(node.exprName) :
             checkExpression(node.exprName);
