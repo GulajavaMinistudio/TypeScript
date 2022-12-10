@@ -56,6 +56,7 @@ import {
     every,
     ExportKind,
     Expression,
+    ExpressionWithTypeArguments,
     factory,
     filter,
     find,
@@ -167,6 +168,8 @@ import {
     isInString,
     isIntersectionTypeNode,
     isJSDoc,
+    isJSDocAugmentsTag,
+    isJSDocImplementsTag,
     isJSDocParameterTag,
     isJSDocTag,
     isJSDocTemplateTag,
@@ -1389,7 +1392,9 @@ function createCompletionEntry(
         sortText = SortText.SortBelow(sortText);
     }
 
-    if (isJsxIdentifierExpected && !isRightOfOpenTag && preferences.includeCompletionsWithSnippetText && preferences.jsxAttributeCompletionStyle && preferences.jsxAttributeCompletionStyle !== "none") {
+    if (isJsxIdentifierExpected && !isRightOfOpenTag
+        && preferences.includeCompletionsWithSnippetText && preferences.jsxAttributeCompletionStyle
+        && preferences.jsxAttributeCompletionStyle !== "none" && !(isJsxAttribute(location.parent) && location.parent.initializer)) {
         let useBraces = preferences.jsxAttributeCompletionStyle === "braces";
         const type = typeChecker.getTypeOfSymbolAtLocation(symbol, location);
 
@@ -2967,10 +2972,13 @@ function getCompletionData(
         }
     }
 
-    function tryGetTypeExpressionFromTag(tag: JSDocTag): JSDocTypeExpression | undefined {
+    function tryGetTypeExpressionFromTag(tag: JSDocTag): JSDocTypeExpression | ExpressionWithTypeArguments | undefined {
         if (isTagWithTypeExpression(tag)) {
             const typeExpression = isJSDocTemplateTag(tag) ? tag.constraint : tag.typeExpression;
             return typeExpression && typeExpression.kind === SyntaxKind.JSDocTypeExpression ? typeExpression : undefined;
+        }
+        if (isJSDocAugmentsTag(tag) || isJSDocImplementsTag(tag)) {
+            return tag.class;
         }
         return undefined;
     }
