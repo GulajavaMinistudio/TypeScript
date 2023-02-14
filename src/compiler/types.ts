@@ -5997,6 +5997,7 @@ export interface NodeLinks {
     declarationRequiresScopeChange?: boolean; // Set by `useOuterVariableScopeInParameter` in checker when downlevel emit would change the name resolution scope inside of a parameter.
     serializedTypes?: Map<string, SerializedTypeEntry>; // Collection of types serialized at this location
     decoratorSignature?: Signature;     // Signature for decorator as if invoked by the runtime.
+    parameterInitializerContainsUndefined?: boolean; // True if this is a parameter declaration whose type annotation contains "undefined".
 }
 
 /** @internal */
@@ -6052,7 +6053,7 @@ export const enum TypeFlags {
     /** @internal */
     Intrinsic = Any | Unknown | String | Number | BigInt | Boolean | BooleanLiteral | ESSymbol | Void | Undefined | Null | Never | NonPrimitive,
     /** @internal */
-    Primitive = String | Number | BigInt | Boolean | Enum | EnumLiteral | ESSymbol | Void | Undefined | Null | Literal | UniqueESSymbol,
+    Primitive = String | Number | BigInt | Boolean | Enum | EnumLiteral | ESSymbol | Void | Undefined | Null | Literal | UniqueESSymbol | TemplateLiteral,
     StringLike = String | StringLiteral | TemplateLiteral | StringMapping,
     NumberLike = Number | NumberLiteral | Enum,
     BigIntLike = BigInt | BigIntLiteral,
