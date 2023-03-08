@@ -33,6 +33,7 @@ import {
     BigIntLiteral,
     BigIntLiteralType,
     BinaryExpression,
+    BinaryOperator,
     BinaryOperatorToken,
     binarySearch,
     BindableObjectDefinePropertyCall,
@@ -244,6 +245,7 @@ import {
     getCombinedModifierFlags,
     getCombinedNodeFlags,
     getContainingClass,
+    getContainingClassStaticBlock,
     getContainingFunction,
     getContainingFunctionOrClassStaticBlock,
     getDeclarationModifierFlagsFromSymbol,
@@ -470,6 +472,7 @@ import {
     isCommaSequence,
     isCommonJsExportedExpression,
     isCommonJsExportPropertyAssignment,
+    isCompoundAssignment,
     isComputedNonLiteralName,
     isComputedPropertyName,
     isConstructorDeclaration,
@@ -1710,7 +1713,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         createIndexInfo,
         getAnyType: () => anyType,
         getStringType: () => stringType,
+        getStringLiteralType,
         getNumberType: () => numberType,
+        getNumberLiteralType,
+        getBigIntType: () => bigintType,
         createPromiseType,
         createArrayType,
         getElementTypeOfArrayType,
@@ -12210,9 +12216,19 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function addInheritedMembers(symbols: SymbolTable, baseSymbols: Symbol[]) {
-        for (const s of baseSymbols) {
-            if (!symbols.has(s.escapedName) && !isStaticPrivateIdentifierProperty(s)) {
-                symbols.set(s.escapedName, s);
+        for (const base of baseSymbols) {
+            if (isStaticPrivateIdentifierProperty(base)) {
+                continue;
+            }
+            const derived = symbols.get(base.escapedName);
+            if (!derived
+                // non-constructor/static-block assignment declarations are ignored here; they're not treated as overrides
+                || derived.valueDeclaration
+                    && isBinaryExpression(derived.valueDeclaration)
+                    && !isConstructorDeclaredProperty(derived)
+                    && !getContainingClassStaticBlock(derived.valueDeclaration)) {
+                    symbols.set(base.escapedName, base);
+                symbols.set(base.escapedName, base);
             }
         }
     }
@@ -16763,12 +16779,16 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return reduceLeft(types, (n, t) => n + getConstituentCount(t), 0);
     }
 
+    function areIntersectedTypesAvoidingPrimitiveReduction(t1: Type, t2: Type) {
+        return !!(t1.flags & (TypeFlags.String | TypeFlags.Number | TypeFlags.BigInt)) && t2 === emptyTypeLiteralType;
+    }
+
     function getTypeFromIntersectionTypeNode(node: IntersectionTypeNode): Type {
         const links = getNodeLinks(node);
         if (!links.resolvedType) {
             const aliasSymbol = getAliasSymbolForTypeNode(node);
             const types = map(node.types, getTypeFromTypeNode);
-            const noSupertypeReduction = types.length === 2 && !!(types[0].flags & (TypeFlags.String | TypeFlags.Number | TypeFlags.BigInt)) && types[1] === emptyTypeLiteralType;
+            const noSupertypeReduction = types.length === 2 && (areIntersectedTypesAvoidingPrimitiveReduction(types[0], types[1]) || areIntersectedTypesAvoidingPrimitiveReduction(types[1], types[0]));
             links.resolvedType = getIntersectionType(types, aliasSymbol, getTypeArgumentsForAliasSymbol(aliasSymbol), noSupertypeReduction);
         }
         return links.resolvedType;
@@ -20708,9 +20728,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                                     const propDeclaration = prop.valueDeclaration as ObjectLiteralElementLike;
                                     Debug.assertNode(propDeclaration, isObjectLiteralElementLike);
 
-                                    errorNode = propDeclaration;
-
                                     const name = propDeclaration.name!;
+                                    errorNode = name;
+
                                     if (isIdentifier(name)) {
                                         suggestion = getSuggestionForNonexistentProperty(name, errorTarget);
                                     }
@@ -31041,9 +31061,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return nonNullType;
     }
 
-    function checkPropertyAccessExpression(node: PropertyAccessExpression, checkMode: CheckMode | undefined) {
+    function checkPropertyAccessExpression(node: PropertyAccessExpression, checkMode: CheckMode | undefined, writeOnly?: boolean) {
         return node.flags & NodeFlags.OptionalChain ? checkPropertyAccessChain(node as PropertyAccessChain, checkMode) :
-            checkPropertyAccessExpressionOrQualifiedName(node, node.expression, checkNonNullExpression(node.expression), node.name, checkMode);
+            checkPropertyAccessExpressionOrQualifiedName(node, node.expression, checkNonNullExpression(node.expression), node.name, checkMode, writeOnly);
     }
 
     function checkPropertyAccessChain(node: PropertyAccessChain, checkMode: CheckMode | undefined) {
@@ -31186,7 +31206,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             && getThisContainer(node, /*includeArrowFunctions*/ true, /*includeClassComputedPropertyName*/ false) === getDeclaringConstructor(prop);
     }
 
-    function checkPropertyAccessExpressionOrQualifiedName(node: PropertyAccessExpression | QualifiedName, left: Expression | QualifiedName, leftType: Type, right: Identifier | PrivateIdentifier, checkMode: CheckMode | undefined) {
+    function checkPropertyAccessExpressionOrQualifiedName(node: PropertyAccessExpression | QualifiedName, left: Expression | QualifiedName, leftType: Type, right: Identifier | PrivateIdentifier, checkMode: CheckMode | undefined, writeOnly?: boolean) {
         const parentSymbol = getNodeLinks(left).resolvedSymbol;
         const assignmentKind = getAssignmentTargetKind(node);
         const apparentType = getApparentType(assignmentKind !== AssignmentKind.None || isMethodAccessForCall(node) ? getWidenedType(leftType) : leftType);
@@ -31294,14 +31314,13 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             checkPropertyNotUsedBeforeDeclaration(prop, node, right);
             markPropertyAsReferenced(prop, node, isSelfTypeAccess(left, parentSymbol));
             getNodeLinks(node).resolvedSymbol = prop;
-            const writing = isWriteAccess(node);
-            checkPropertyAccessibility(node, left.kind === SyntaxKind.SuperKeyword, writing, apparentType, prop);
+            checkPropertyAccessibility(node, left.kind === SyntaxKind.SuperKeyword, isWriteAccess(node), apparentType, prop);
             if (isAssignmentToReadonlyEntity(node as Expression, prop, assignmentKind)) {
                 error(right, Diagnostics.Cannot_assign_to_0_because_it_is_a_read_only_property, idText(right));
                 return errorType;
             }
 
-            propType = isThisPropertyAccessInConstructor(node, prop) ? autoType : writing ? getWriteTypeOfSymbol(prop) : getTypeOfSymbol(prop);
+            propType = isThisPropertyAccessInConstructor(node, prop) ? autoType : writeOnly || isWriteOnlyAccess(node) ? getWriteTypeOfSymbol(prop) : getTypeOfSymbol(prop);
         }
 
         return getFlowTypeOfAccessExpression(node, prop, propType, right, checkMode);
@@ -36793,6 +36812,13 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             }
 
             function checkAssignmentOperatorWorker() {
+                let assigneeType = leftType;
+
+                // getters can be a subtype of setters, so to check for assignability we use the setter's type instead
+                if (isCompoundAssignment(operatorToken.kind as BinaryOperator) && left.kind === SyntaxKind.PropertyAccessExpression) {
+                    assigneeType = checkPropertyAccessExpression(left as PropertyAccessExpression, /*checkMode*/ undefined, /*writeOnly*/ true);
+                }
+
                 // TypeScript 1.0 spec (April 2014): 4.17
                 // An assignment of the form
                 //    VarExpr = ValueExpr
@@ -36813,7 +36839,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                         }
                     }
                     // to avoid cascading errors check assignability only if 'isReference' check succeeded and no errors were reported
-                    checkTypeAssignableToAndOptionallyElaborate(valueType, leftType, left, right, headMessage);
+                    checkTypeAssignableToAndOptionallyElaborate(valueType, assigneeType, left, right, headMessage);
                 }
             }
         }
@@ -37519,7 +37545,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 return nullWideningType;
             case SyntaxKind.NoSubstitutionTemplateLiteral:
             case SyntaxKind.StringLiteral:
-                return getFreshTypeOfLiteralType(getStringLiteralType((node as StringLiteralLike).text));
+                return hasSkipDirectInferenceFlag(node) ?
+                    anyType :
+                    getFreshTypeOfLiteralType(getStringLiteralType((node as StringLiteralLike).text));
             case SyntaxKind.NumericLiteral:
                 checkGrammarNumericLiteral(node as NumericLiteral);
                 return getFreshTypeOfLiteralType(getNumberLiteralType(+(node as NumericLiteral).text));
@@ -38247,7 +38275,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function checkAccessorDeclaration(node: AccessorDeclaration) {
-        if (isIdentifier(node.name) && idText(node.name) === "constructor") {
+        if (isIdentifier(node.name) && idText(node.name) === "constructor" && isClassLike(node.parent)) {
             error(node.name, Diagnostics.Class_constructor_may_not_be_an_accessor);
         }
         addLazyDiagnostic(checkAccessorDeclarationDiagnostics);
