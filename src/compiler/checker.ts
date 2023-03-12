@@ -12644,11 +12644,11 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
         function expandSignatureParametersWithTupleMembers(restType: TupleTypeReference, restIndex: number) {
             const elementTypes = getTypeArguments(restType);
-            const associatedNames = restType.target.labeledElementDeclarations;
+            const associatedNames = getUniqAssociatedNamesFromTupleType(restType);
             const restParams = map(elementTypes, (t, i) => {
                 // Lookup the label from the individual tuple passed in before falling back to the signature `rest` parameter name
-                const tupleLabelName = !!associatedNames && getTupleElementLabel(associatedNames[i]);
-                const name = tupleLabelName || getParameterNameAtPosition(sig, restIndex + i, restType);
+                const name = associatedNames && associatedNames[i] ? associatedNames[i] :
+                    getParameterNameAtPosition(sig, restIndex + i, restType);
                 const flags = restType.target.elementFlags[i];
                 const checkFlags = flags & ElementFlags.Variable ? CheckFlags.RestParameter :
                     flags & ElementFlags.Optional ? CheckFlags.OptionalParameter : 0;
@@ -12657,6 +12657,22 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 return symbol;
             });
             return concatenate(sig.parameters.slice(0, restIndex), restParams);
+        }
+
+        function getUniqAssociatedNamesFromTupleType(type: TupleTypeReference) {
+            const associatedNamesMap = new Map<__String, number>();
+            return map(type.target.labeledElementDeclarations, labeledElement => {
+                const name = getTupleElementLabel(labeledElement);
+                const prevCounter = associatedNamesMap.get(name);
+                if (prevCounter === undefined) {
+                    associatedNamesMap.set(name, 1);
+                    return name;
+                }
+                else {
+                    associatedNamesMap.set(name, prevCounter + 1);
+                    return `${name}_${prevCounter}` as __String;
+                }
+            });
         }
     }
 
@@ -19558,18 +19574,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 return result;
             }
             const moreThanOneRealChildren = length(validChildren) > 1;
-            let arrayLikeTargetParts: Type;
-            let nonArrayLikeTargetParts: Type;
-            const iterableType = getGlobalIterableType(/*reportErrors*/ false);
-            if (iterableType !== emptyGenericType) {
-                const anyIterable = createIterableType(anyType);
-                arrayLikeTargetParts = filterType(childrenTargetType, t => isTypeAssignableTo(t, anyIterable));
-                nonArrayLikeTargetParts = filterType(childrenTargetType, t => !isTypeAssignableTo(t, anyIterable));
-            }
-            else {
-                arrayLikeTargetParts = filterType(childrenTargetType, isArrayOrTupleLikeType);
-                nonArrayLikeTargetParts = filterType(childrenTargetType, t => !isArrayOrTupleLikeType(t));
-            }
+            const arrayLikeTargetParts = filterType(childrenTargetType, isAssignableToAvailableAnyIterable);
+            const nonArrayLikeTargetParts = filterType(childrenTargetType, t => !isAssignableToAvailableAnyIterable(t));
             if (moreThanOneRealChildren) {
                 if (arrayLikeTargetParts !== neverType) {
                     const realSource = createTupleType(checkJsxChildren(containingElement, CheckMode.Normal));
@@ -23090,6 +23096,11 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
     function isArrayOrTupleLikeType(type: Type): boolean {
         return isArrayLikeType(type) || isTupleLikeType(type);
+    }
+
+    function isAssignableToAvailableAnyIterable(type: Type): boolean {
+        const anyIterable = getGlobalIterableType(/*reportErrors*/ false) !== emptyGenericType && createIterableType(anyType);
+        return anyIterable ? isTypeAssignableTo(type, anyIterable) : isArrayOrTupleLikeType(type);
     }
 
     function getTupleElementType(type: Type, index: number) {
@@ -29051,7 +29062,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     // type of T.
     function getContextualTypeForElementExpression(arrayContextualType: Type | undefined, index: number): Type | undefined {
         return arrayContextualType && (
-            index >= 0 && getTypeOfPropertyOfContextualType(arrayContextualType, "" + index as __String) ||
+            index >= 0 && getTypeOfPropertyOfContextualType(filterType(arrayContextualType, t => !!getIndexTypeOfType(t, numberType) || isAssignableToAvailableAnyIterable(t)), "" + index as __String) ||
             mapType(arrayContextualType, t =>
                 isTupleType(t) ?
                     getElementTypeOfSliceOfTupleType(t, 0, /*endSkipCount*/ 0, /*writing*/ false, /*noReductions*/ true) :
@@ -29712,9 +29723,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         const elementFlags: ElementFlags[] = [];
         pushCachedContextualType(node);
         const inDestructuringPattern = isAssignmentTarget(node);
-        const inConstContext = isConstContext(node);
+        const isSpreadIntoCallOrNew = isSpreadElement(node.parent) && isCallOrNewExpression(node.parent.parent);
+        const inConstContext = isSpreadIntoCallOrNew || isConstContext(node);
         const contextualType = getApparentTypeOfContextualType(node, /*contextFlags*/ undefined);
-        const inTupleContext = !!contextualType && someType(contextualType, isTupleLikeType);
+        const inTupleContext = isSpreadIntoCallOrNew || !!contextualType && someType(contextualType, isTupleLikeType);
         let hasOmittedExpression = false;
         for (let i = 0; i < elementCount; i++) {
             const e = elements[i];
@@ -38763,8 +38775,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                         // both are private identifiers
                         isPrivateIdentifier(node.name) && isPrivateIdentifier(subsequentName) && node.name.escapedText === subsequentName.escapedText ||
                         // Both are computed property names
-                        // TODO: GH#17345: These are methods, so handle computed name case. (`Always allowing computed property names is *not* the correct behavior!)
-                        isComputedPropertyName(node.name) && isComputedPropertyName(subsequentName) ||
+                        isComputedPropertyName(node.name) && isComputedPropertyName(subsequentName) && isTypeIdenticalTo(checkComputedPropertyName(node.name), checkComputedPropertyName(subsequentName)) ||
                         // Both are literal property names that are the same.
                         isPropertyNameLiteral(node.name) && isPropertyNameLiteral(subsequentName) &&
                         getEscapedTextOfIdentifierOrLiteral(node.name) === getEscapedTextOfIdentifierOrLiteral(subsequentName)
