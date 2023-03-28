@@ -9460,7 +9460,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     else {
                         const statement = factory.createVariableStatement(/*modifiers*/ undefined, factory.createVariableDeclarationList([
                             factory.createVariableDeclaration(varName, /*exclamationToken*/ undefined, serializeTypeForDeclaration(context, typeToSerialize, symbol, enclosingDeclaration, includePrivateSymbol, bundled))
-                        ], NodeFlags.Const));
+                        ], context.enclosingDeclaration?.kind === SyntaxKind.ModuleDeclaration ? NodeFlags.Let : NodeFlags.Const));
                         // Inlined JSON types exported with [module.]exports= will already emit an export=, so should use `declare`.
                         // Otherwise, the type itself should be exported.
                         addResult(statement,
@@ -9530,7 +9530,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                         // need to be merged namespace members
                         return [];
                     }
-                    if (p.flags & SymbolFlags.Prototype ||
+                    if (p.flags & SymbolFlags.Prototype || p.escapedName === "constructor" ||
                         (baseType && getPropertyOfType(baseType, p.escapedName)
                          && isReadonlySymbol(getPropertyOfType(baseType, p.escapedName)!) === isReadonlySymbol(p)
                          && (p.flags & SymbolFlags.Optional) === (getPropertyOfType(baseType, p.escapedName)!.flags & SymbolFlags.Optional)
@@ -13605,6 +13605,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function getConstraintOfDistributiveConditionalType(type: ConditionalType): Type | undefined {
+        if (type.resolvedConstraintOfDistributive !== undefined) {
+            return type.resolvedConstraintOfDistributive || undefined;
+        }
+
         // Check if we have a conditional type of the form 'T extends U ? X : Y', where T is a constrained
         // type parameter. If so, create an instantiation of the conditional type where T is replaced
         // with its constraint. We do this because if the constraint is a union type it will be distributed
@@ -13622,10 +13626,12 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             if (constraint && constraint !== type.checkType) {
                 const instantiated = getConditionalTypeInstantiation(type, prependTypeMapping(type.root.checkType, constraint, type.mapper));
                 if (!(instantiated.flags & TypeFlags.Never)) {
+                    type.resolvedConstraintOfDistributive = instantiated;
                     return instantiated;
                 }
             }
         }
+        type.resolvedConstraintOfDistributive = false;
         return undefined;
     }
 
@@ -35658,8 +35664,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             const functionFlags = getFunctionFlags(func);
             const type = returnType && unwrapReturnType(returnType, functionFlags);
 
-            // Functions with an explicitly specified 'undefined, 'void' or 'any' return type don't need any return expressions.
-            if (type && maybeTypeOfKind(type, TypeFlags.Undefined | TypeFlags.Void | TypeFlags.Any)) {
+            // Functions with an explicitly specified 'undefined, 'void', 'any' or 'unknown' return type don't need any return expressions.
+            if (type && maybeTypeOfKind(type, TypeFlags.Undefined | TypeFlags.Void | TypeFlags.Any | TypeFlags.Unknown)) {
                 return;
             }
 
