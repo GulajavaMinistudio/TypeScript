@@ -275,6 +275,7 @@ import {
     getEntityNameFromTypeNode,
     getErrorSpanForNode,
     getEscapedTextOfIdentifierOrLiteral,
+    getEscapedTextOfJsxAttributeName,
     getESModuleInterop,
     getExpandoInitializer,
     getExportAssignmentExpression,
@@ -350,6 +351,7 @@ import {
     getSymbolNameForPrivateIdentifier,
     getTextOfIdentifierOrLiteral,
     getTextOfJSDocComment,
+    getTextOfJsxAttributeName,
     getTextOfNode,
     getTextOfPropertyName,
     getThisContainer,
@@ -593,6 +595,7 @@ import {
     isJsxAttributeLike,
     isJsxAttributes,
     isJsxElement,
+    isJsxNamespacedName,
     isJsxOpeningElement,
     isJsxOpeningFragment,
     isJsxOpeningLikeElement,
@@ -807,7 +810,6 @@ import {
     MappedTypeNode,
     MatchingKeys,
     maybeBind,
-    MemberName,
     MemberOverrideStatus,
     memoize,
     MetaProperty,
@@ -1881,6 +1883,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
     var tupleTypes = new Map<string, GenericType>();
     var unionTypes = new Map<string, UnionType>();
+    var unionOfUnionTypes = new Map<string, Type>();
     var intersectionTypes = new Map<string, Type>();
     var stringLiteralTypes = new Map<string, StringLiteralType>();
     var numberLiteralTypes = new Map<number, NumberLiteralType>();
@@ -13516,7 +13519,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     function isTypeInvalidDueToUnionDiscriminant(contextualType: Type, obj: ObjectLiteralExpression | JsxAttributes): boolean {
         const list = obj.properties as NodeArray<ObjectLiteralElementLike | JsxAttributeLike>;
         return list.some(property => {
-            const nameType = property.name && getLiteralTypeFromPropertyName(property.name);
+            const nameType = property.name && (isJsxNamespacedName(property.name) ? getStringLiteralType(getTextOfJsxAttributeName(property.name)) : getLiteralTypeFromPropertyName(property.name));
             const name = nameType && isTypeUsableAsPropertyName(nameType) ? getPropertyNameFromType(nameType) : undefined;
             const expected = name === undefined ? undefined : getTypeOfPropertyOfType(contextualType, name);
             return !!expected && isLiteralType(expected) && !isTypeAssignableTo(getTypeOfNode(property), expected);
@@ -16228,9 +16231,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
     function addTypeToUnion(typeSet: Type[], includes: TypeFlags, type: Type) {
         const flags = type.flags;
-        if (flags & TypeFlags.Union) {
-            return addTypesToUnion(typeSet, includes | (isNamedUnionType(type) ? TypeFlags.Union : 0), (type as UnionType).types);
-        }
         // We ignore 'never' types in unions
         if (!(flags & TypeFlags.Never)) {
             includes |= flags & TypeFlags.IncludesMask;
@@ -16253,8 +16253,17 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     // Add the given types to the given type set. Order is preserved, duplicates are removed,
     // and nested types of the given kind are flattened into the set.
     function addTypesToUnion(typeSet: Type[], includes: TypeFlags, types: readonly Type[]): TypeFlags {
+        let lastType: Type | undefined;
         for (const type of types) {
-            includes = addTypeToUnion(typeSet, includes, type);
+            // We skip the type if it is the same as the last type we processed. This simple test particularly
+            // saves a lot of work for large lists of the same union type, such as when resolving `Record<A, B>[A]`,
+            // where A and B are large union types.
+            if (type !== lastType) {
+                includes = type.flags & TypeFlags.Union ?
+                    addTypesToUnion(typeSet, includes | (isNamedUnionType(type) ? TypeFlags.Union : 0), (type as UnionType).types) :
+                    addTypeToUnion(typeSet, includes, type);
+                lastType = type;
+            }
         }
         return includes;
     }
@@ -16406,6 +16415,22 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         if (types.length === 1) {
             return types[0];
         }
+        // We optimize for the common case of unioning a union type with some other type (such as `undefined`).
+        if (types.length === 2 && !origin && (types[0].flags & TypeFlags.Union || types[1].flags & TypeFlags.Union)) {
+            const infix = unionReduction === UnionReduction.None ? "N" : unionReduction === UnionReduction.Subtype ? "S" : "L";
+            const index = types[0].id < types[1].id ? 0 : 1;
+            const id = types[index].id + infix + types[1 - index].id + getAliasId(aliasSymbol, aliasTypeArguments);
+            let type = unionOfUnionTypes.get(id);
+            if (!type) {
+                type = getUnionTypeWorker(types, unionReduction, aliasSymbol, aliasTypeArguments, /*origin*/ undefined);
+                unionOfUnionTypes.set(id, type);
+            }
+            return type;
+        }
+        return getUnionTypeWorker(types, unionReduction, aliasSymbol, aliasTypeArguments, origin);
+    }
+
+    function getUnionTypeWorker(types: readonly Type[], unionReduction: UnionReduction, aliasSymbol: Symbol | undefined, aliasTypeArguments: readonly Type[] | undefined, origin: Type | undefined): Type {
         let typeSet: Type[] | undefined = [];
         const includes = addTypesToUnion(typeSet, 0 as TypeFlags, types);
         if (unionReduction !== UnionReduction.None) {
@@ -19567,8 +19592,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     function *generateJsxAttributes(node: JsxAttributes): ElaborationIterator {
         if (!length(node.properties)) return;
         for (const prop of node.properties) {
-            if (isJsxSpreadAttribute(prop) || isHyphenatedJsxName(idText(prop.name))) continue;
-            yield { errorNode: prop.name, innerExpression: prop.initializer, nameType: getStringLiteralType(idText(prop.name)) };
+            if (isJsxSpreadAttribute(prop) || isHyphenatedJsxName(getTextOfJsxAttributeName(prop.name))) continue;
+            yield { errorNode: prop.name, innerExpression: prop.initializer, nameType: getStringLiteralType(getTextOfJsxAttributeName(prop.name)) };
         }
     }
 
@@ -25003,12 +25028,14 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
 
         function inferFromSignature(source: Signature, target: Signature) {
-            const saveBivariant = bivariant;
-            const kind = target.declaration ? target.declaration.kind : SyntaxKind.Unknown;
-            // Once we descend into a bivariant signature we remain bivariant for all nested inferences
-            bivariant = bivariant || kind === SyntaxKind.MethodDeclaration || kind === SyntaxKind.MethodSignature || kind === SyntaxKind.Constructor;
-            applyToParameterTypes(source, target, inferFromContravariantTypesIfStrictFunctionTypes);
-            bivariant = saveBivariant;
+            if (!(source.flags & SignatureFlags.IsNonInferrable)) {
+                const saveBivariant = bivariant;
+                const kind = target.declaration ? target.declaration.kind : SyntaxKind.Unknown;
+                // Once we descend into a bivariant signature we remain bivariant for all nested inferences
+                bivariant = bivariant || kind === SyntaxKind.MethodDeclaration || kind === SyntaxKind.MethodSignature || kind === SyntaxKind.Constructor;
+                applyToParameterTypes(source, target, inferFromContravariantTypesIfStrictFunctionTypes);
+                bivariant = saveBivariant;
+            }
             applyToReturnTypes(source, target, inferFromTypes);
         }
 
@@ -29241,7 +29268,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             if (!attributesType || isTypeAny(attributesType)) {
                 return undefined;
             }
-            return getTypeOfPropertyOfContextualType(attributesType, attribute.name.escapedText);
+            return getTypeOfPropertyOfContextualType(attributesType, getEscapedTextOfJsxAttributeName(attribute.name));
         }
         else {
             return getContextualType(attribute.parent, contextFlags);
@@ -30328,7 +30355,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     /**
      * Returns true iff React would emit this tag name as a string rather than an identifier or qualified name
      */
-    function isJsxIntrinsicIdentifier(tagName: JsxTagNameExpression): boolean {
+    function isJsxIntrinsicIdentifier(tagName: JsxTagNameExpression): tagName is Identifier {
         return tagName.kind === SyntaxKind.Identifier && isIntrinsicJsxName(tagName.escapedText);
     }
 
@@ -30375,12 +30402,12 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 attributeSymbol.links.target = member;
                 attributesTable.set(attributeSymbol.escapedName, attributeSymbol);
                 allAttributesTable?.set(attributeSymbol.escapedName, attributeSymbol);
-                if (attributeDecl.name.escapedText === jsxChildrenPropertyName) {
+                if (getEscapedTextOfJsxAttributeName(attributeDecl.name) === jsxChildrenPropertyName) {
                     explicitlySpecifyChildrenAttribute = true;
                 }
                 if (contextualType) {
                     const prop = getPropertyOfType(contextualType, member.escapedName);
-                    if (prop && prop.declarations && isDeprecatedSymbol(prop)) {
+                    if (prop && prop.declarations && isDeprecatedSymbol(prop) && isIdentifier(attributeDecl.name)) {
                         addDeprecatedSuggestion(attributeDecl.name, prop.declarations, attributeDecl.name.escapedText as string);
                     }
                 }
@@ -30793,6 +30820,12 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
     }
 
+    function getJsxElementTypeTypeAt(location: Node): Type | undefined {
+        const type = getJsxType(JsxNames.ElementType, location);
+        if (isErrorType(type)) return undefined;
+        return type;
+    }
+
     /**
      * Returns all the properties of the Jsx.IntrinsicElements interface
      */
@@ -30861,7 +30894,21 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             const jsxOpeningLikeNode = node ;
             const sig = getResolvedSignature(jsxOpeningLikeNode);
             checkDeprecatedSignature(sig, node);
-            checkJsxReturnAssignableToAppropriateBound(getJsxReferenceKind(jsxOpeningLikeNode), getReturnTypeOfSignature(sig), jsxOpeningLikeNode);
+
+            const elementTypeConstraint = getJsxElementTypeTypeAt(jsxOpeningLikeNode);
+            if (elementTypeConstraint !== undefined) {
+                const tagName = jsxOpeningLikeNode.tagName;
+                const tagType = isJsxIntrinsicIdentifier(tagName)
+                    ? getStringLiteralType(unescapeLeadingUnderscores(tagName.escapedText))
+                    : checkExpression(tagName);
+                checkTypeRelatedTo(tagType, elementTypeConstraint, assignableRelation, tagName, Diagnostics.Its_type_0_is_not_a_valid_JSX_element_type, () => {
+                    const componentName = getTextOfNode(tagName);
+                    return chainDiagnosticMessages(/*details*/ undefined, Diagnostics._0_cannot_be_used_as_a_JSX_component, componentName);
+                });
+            }
+            else {
+                checkJsxReturnAssignableToAppropriateBound(getJsxReferenceKind(jsxOpeningLikeNode), getReturnTypeOfSignature(sig), jsxOpeningLikeNode);
+            }
         }
     }
 
@@ -35740,7 +35787,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                         return links.contextFreeType;
                     }
                     const returnType = getReturnTypeFromBody(node, checkMode);
-                    const returnOnlySignature = createSignature(/*declaration*/ undefined, /*typeParameters*/ undefined, /*thisParameter*/ undefined, emptyArray, returnType, /*resolvedTypePredicate*/ undefined, 0, SignatureFlags.None);
+                    const returnOnlySignature = createSignature(/*declaration*/ undefined, /*typeParameters*/ undefined, /*thisParameter*/ undefined, emptyArray, returnType, /*resolvedTypePredicate*/ undefined, 0, SignatureFlags.IsNonInferrable);
                     const returnOnlyType = createAnonymousType(node.symbol, emptySymbols, [returnOnlySignature], emptyArray, emptyArray);
                     returnOnlyType.objectFlags |= ObjectFlags.NonInferrableType;
                     return links.contextFreeType = returnOnlyType;
@@ -47807,8 +47854,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             }
 
             const { name, initializer } = attr;
-            if (!seen.get(name.escapedText)) {
-                seen.set(name.escapedText, true);
+            const escapedText = getEscapedTextOfJsxAttributeName(name);
+            if (!seen.get(escapedText)) {
+                seen.set(escapedText, true);
             }
             else {
                 return grammarErrorOnNode(name, Diagnostics.JSX_elements_cannot_have_multiple_attributes_with_the_same_name);
@@ -47821,25 +47869,11 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function checkGrammarJsxName(node: JsxTagNameExpression) {
-        if (isPropertyAccessExpression(node)) {
-            let propName: JsxTagNameExpression = node;
-            do {
-                const check = checkGrammarJsxNestedIdentifier(propName.name);
-                if (check) {
-                    return check;
-                }
-                propName = propName.expression;
-            } while (isPropertyAccessExpression(propName));
-            const check = checkGrammarJsxNestedIdentifier(propName);
-            if (check) {
-                return check;
-            }
+        if (isPropertyAccessExpression(node) && isJsxNamespacedName(node.expression)) {
+            return grammarErrorOnNode(node.expression, Diagnostics.JSX_property_access_expressions_cannot_include_JSX_namespace_names);
         }
-
-        function checkGrammarJsxNestedIdentifier(name: MemberName | ThisExpression) {
-            if (isIdentifier(name) && idText(name).indexOf(":") !== -1) {
-                return grammarErrorOnNode(name, Diagnostics.JSX_property_access_expressions_cannot_include_JSX_namespace_names);
-            }
+        if (isJsxNamespacedName(node) && getJSXTransformEnabled(compilerOptions) && !isIntrinsicJsxName(node.namespace.escapedText)) {
+            return grammarErrorOnNode(node, Diagnostics.React_components_cannot_include_JSX_namespace_names);
         }
     }
 
@@ -48800,6 +48834,7 @@ namespace JsxNames {
     export const ElementAttributesPropertyNameContainer = "ElementAttributesProperty" as __String; // TODO: Deprecate and remove support
     export const ElementChildrenAttributeNameContainer = "ElementChildrenAttribute" as __String;
     export const Element = "Element" as __String;
+    export const ElementType = "ElementType" as __String;
     export const IntrinsicAttributes = "IntrinsicAttributes" as __String;
     export const IntrinsicClassAttributes = "IntrinsicClassAttributes" as __String;
     export const LibraryManagedAttributes = "LibraryManagedAttributes" as __String;
