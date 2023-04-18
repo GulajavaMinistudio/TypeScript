@@ -290,3 +290,35 @@ function f1<T extends (props: {}) => React.ReactElement<any>>(Component: T) {
 >Unresolved : any
 >foo : string
 
+declare global {
+>global : any
+
+    namespace JSX {
+      interface IntrinsicElements {
+          ['a:b']: { a: string };
+>['a:b'] : { a: string; }
+>'a:b' : "a:b"
+>a : string
+      }
+  }
+}
+
+<a:b a="accepted" />;
+><a:b a="accepted" /> : JSX.Element
+>a : any
+>b : any
+>a : string
+
+<a:b b="rejected" />;
+><a:b b="rejected" /> : JSX.Element
+>a : any
+>b : any
+>b : string
+
+<a:b a="accepted" b="rejected" />;
+><a:b a="accepted" b="rejected" /> : JSX.Element
+>a : any
+>b : any
+>a : string
+>b : string
+

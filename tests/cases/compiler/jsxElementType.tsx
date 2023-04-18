@@ -99,3 +99,15 @@ function f1<T extends (props: {}) => React.ReactElement<any>>(Component: T) {
 
 <Unresolved />;
 <Unresolved foo="abc" />;
+
+declare global {
+    namespace JSX {
+      interface IntrinsicElements {
+          ['a:b']: { a: string };
+      }
+  }
+}
+
+<a:b a="accepted" />;
+<a:b b="rejected" />;
+<a:b a="accepted" b="rejected" />;
