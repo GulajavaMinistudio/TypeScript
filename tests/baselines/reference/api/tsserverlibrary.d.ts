@@ -501,6 +501,14 @@ declare namespace ts {
             type GetApplicableRefactorsRequestArgs = FileLocationOrRangeRequestArgs & {
                 triggerReason?: RefactorTriggerReason;
                 kind?: string;
+                /**
+                 * Include refactor actions that require additional arguments to be passed when
+                 * calling 'GetEditsForRefactor'. When true, clients should inspect the
+                 * `isInteractive` property of each returned `RefactorActionInfo`
+                 * and ensure they are able to collect the appropriate arguments for any
+                 * interactive refactor before offering it.
+                 */
+                includeInteractiveActions?: boolean;
             };
             type RefactorTriggerReason = "implicit" | "invoked";
             /**
@@ -557,6 +565,11 @@ declare namespace ts {
                  * The hierarchical dotted name of the refactor action.
                  */
                 kind?: string;
+                /**
+                 * Indicates that the action requires additional arguments to be passed
+                 * when calling 'GetEditsForRefactor'.
+                 */
+                isInteractive?: boolean;
             }
             interface GetEditsForRefactorRequest extends Request {
                 command: CommandTypes.GetEditsForRefactor;
@@ -3554,7 +3567,7 @@ declare namespace ts {
             cancellationToken: HostCancellationToken;
             useSingleInferredProject: boolean;
             useInferredProjectPerProjectRoot: boolean;
-            typingsInstaller: ITypingsInstaller;
+            typingsInstaller?: ITypingsInstaller;
             eventHandler?: ProjectServiceEventHandler;
             suppressDiagnosticEvents?: boolean;
             throttleWaitMilliseconds?: number;
@@ -3826,7 +3839,7 @@ declare namespace ts {
             cancellationToken: ServerCancellationToken;
             useSingleInferredProject: boolean;
             useInferredProjectPerProjectRoot: boolean;
-            typingsInstaller: ITypingsInstaller;
+            typingsInstaller?: ITypingsInstaller;
             byteLength: (buf: string, encoding?: BufferEncoding) => number;
             hrtime: (start?: [
                 number,
@@ -9234,7 +9247,7 @@ declare namespace ts {
      *   this list is only the set of defaults that are implicitly included.
      */
     function getAutomaticTypeDirectiveNames(options: CompilerOptions, host: ModuleResolutionHost): string[];
-    function createModuleResolutionCache(currentDirectory: string, getCanonicalFileName: (s: string) => string, options?: CompilerOptions): ModuleResolutionCache;
+    function createModuleResolutionCache(currentDirectory: string, getCanonicalFileName: (s: string) => string, options?: CompilerOptions, packageJsonInfoCache?: PackageJsonInfoCache): ModuleResolutionCache;
     function createTypeReferenceDirectiveResolutionCache(currentDirectory: string, getCanonicalFileName: (s: string) => string, options?: CompilerOptions, packageJsonInfoCache?: PackageJsonInfoCache): TypeReferenceDirectiveResolutionCache;
     function resolveModuleNameFromCache(moduleName: string, containingFile: string, cache: ModuleResolutionCache, mode?: ResolutionMode): ResolvedModuleWithFailedLookupLocations | undefined;
     function resolveModuleName(moduleName: string, containingFile: string, compilerOptions: CompilerOptions, host: ModuleResolutionHost, cache?: ModuleResolutionCache, redirectedReference?: ResolvedProjectReference, resolutionMode?: ResolutionMode): ResolvedModuleWithFailedLookupLocations;
@@ -10129,7 +10142,13 @@ declare namespace ts {
         applyCodeActionCommand(fileName: string, action: CodeActionCommand[]): Promise<ApplyCodeActionCommandResult[]>;
         /** @deprecated `fileName` will be ignored */
         applyCodeActionCommand(fileName: string, action: CodeActionCommand | CodeActionCommand[]): Promise<ApplyCodeActionCommandResult | ApplyCodeActionCommandResult[]>;
-        getApplicableRefactors(fileName: string, positionOrRange: number | TextRange, preferences: UserPreferences | undefined, triggerReason?: RefactorTriggerReason, kind?: string): ApplicableRefactorInfo[];
+        /**
+         * @param includeInteractiveActions Include refactor actions that require additional arguments to be
+         * passed when calling `getEditsForRefactor`. When true, clients should inspect the `isInteractive`
+         * property of each returned `RefactorActionInfo` and ensure they are able to collect the appropriate
+         * arguments for any interactive action before offering it.
+         */
+        getApplicableRefactors(fileName: string, positionOrRange: number | TextRange, preferences: UserPreferences | undefined, triggerReason?: RefactorTriggerReason, kind?: string, includeInteractiveActions?: boolean): ApplicableRefactorInfo[];
         getEditsForRefactor(fileName: string, formatOptions: FormatCodeSettings, positionOrRange: number | TextRange, refactorName: string, actionName: string, preferences: UserPreferences | undefined): RefactorEditInfo | undefined;
         organizeImports(args: OrganizeImportsArgs, formatOptions: FormatCodeSettings, preferences: UserPreferences | undefined): readonly FileTextChanges[];
         getEditsForFileRename(oldFilePath: string, newFilePath: string, formatOptions: FormatCodeSettings, preferences: UserPreferences | undefined): readonly FileTextChanges[];
@@ -10401,6 +10420,11 @@ declare namespace ts {
          * The hierarchical dotted name of the refactor action.
          */
         kind?: string;
+        /**
+         * Indicates that the action requires additional arguments to be passed
+         * when calling `getEditsForRefactor`.
+         */
+        isInteractive?: boolean;
     }
     /**
      * A set of edits to make in response to a refactor action, plus an optional
