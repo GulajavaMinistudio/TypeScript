@@ -407,10 +407,8 @@ declare namespace ts {
         NotEmittedStatement = 358,
         PartiallyEmittedExpression = 359,
         CommaListExpression = 360,
-        MergeDeclarationMarker = 361,
-        EndOfDeclarationMarker = 362,
-        SyntheticReferenceExpression = 363,
-        Count = 364,
+        SyntheticReferenceExpression = 361,
+        Count = 362,
         FirstAssignment = 64,
         LastAssignment = 79,
         FirstCompoundAssignment = 65,
@@ -3501,9 +3499,8 @@ declare namespace ts {
         ReuseTempVariableScope = 1048576,
         CustomPrologue = 2097152,
         NoHoisting = 4194304,
-        HasEndOfDeclarationMarker = 8388608,
-        Iterator = 16777216,
-        NoAsciiEscaping = 33554432
+        Iterator = 8388608,
+        NoAsciiEscaping = 16777216
     }
     interface EmitHelperBase {
         readonly name: string;
@@ -4774,6 +4771,26 @@ declare namespace ts {
         parent: ConstructorDeclaration;
         name: Identifier;
     };
+    /**
+     * This function checks multiple locations for JSDoc comments that apply to a host node.
+     * At each location, the whole comment may apply to the node, or only a specific tag in
+     * the comment. In the first case, location adds the entire {@link JSDoc} object. In the
+     * second case, it adds the applicable {@link JSDocTag}.
+     *
+     * For example, a JSDoc comment before a parameter adds the entire {@link JSDoc}. But a
+     * `@param` tag on the parent function only adds the {@link JSDocTag} for the `@param`.
+     *
+     * ```ts
+     * /** JSDoc will be returned for `a` *\/
+     * const a = 0
+     * /**
+     *  * Entire JSDoc will be returned for `b`
+     *  * @param c JSDocTag will be returned for `c`
+     *  *\/
+     * function b(/** JSDoc will be returned for `c` *\/ c) {}
+     * ```
+     */
+    function getJSDocCommentsAndTags(hostNode: Node): readonly (JSDoc | JSDocTag)[];
     /** @deprecated */
     function createUnparsedSourceFile(text: string): UnparsedSource;
     /** @deprecated */
@@ -6153,6 +6170,8 @@ declare namespace ts {
         getRenameInfo(fileName: string, position: number, preferences: UserPreferences): RenameInfo;
         /** @deprecated Use the signature with `UserPreferences` instead. */
         getRenameInfo(fileName: string, position: number, options?: RenameInfoOptions): RenameInfo;
+        findRenameLocations(fileName: string, position: number, findInStrings: boolean, findInComments: boolean, preferences: UserPreferences): readonly RenameLocation[] | undefined;
+        /** @deprecated Pass `providePrefixAndSuffixTextForRename` as part of a `UserPreferences` parameter. */
         findRenameLocations(fileName: string, position: number, findInStrings: boolean, findInComments: boolean, providePrefixAndSuffixTextForRename?: boolean): readonly RenameLocation[] | undefined;
         getSmartSelectionRange(fileName: string, position: number): SelectionRange;
         getDefinitionAtPosition(fileName: string, position: number): readonly DefinitionInfo[] | undefined;
@@ -6205,7 +6224,11 @@ declare namespace ts {
          * arguments for any interactive action before offering it.
          */
         getApplicableRefactors(fileName: string, positionOrRange: number | TextRange, preferences: UserPreferences | undefined, triggerReason?: RefactorTriggerReason, kind?: string, includeInteractiveActions?: boolean): ApplicableRefactorInfo[];
-        getEditsForRefactor(fileName: string, formatOptions: FormatCodeSettings, positionOrRange: number | TextRange, refactorName: string, actionName: string, preferences: UserPreferences | undefined): RefactorEditInfo | undefined;
+        getEditsForRefactor(fileName: string, formatOptions: FormatCodeSettings, positionOrRange: number | TextRange, refactorName: string, actionName: string, preferences: UserPreferences | undefined, includeInteractiveActions?: InteractiveRefactorArguments): RefactorEditInfo | undefined;
+        getMoveToRefactoringFileSuggestions(fileName: string, positionOrRange: number | TextRange, preferences: UserPreferences | undefined, triggerReason?: RefactorTriggerReason, kind?: string): {
+            newFileName: string;
+            files: string[];
+        };
         organizeImports(args: OrganizeImportsArgs, formatOptions: FormatCodeSettings, preferences: UserPreferences | undefined): readonly FileTextChanges[];
         getEditsForFileRename(oldFilePath: string, newFilePath: string, formatOptions: FormatCodeSettings, preferences: UserPreferences | undefined): readonly FileTextChanges[];
         getEmitOutput(fileName: string, emitOnlyDtsFiles?: boolean, forceDtsEmit?: boolean): EmitOutput;
@@ -6712,6 +6735,9 @@ declare namespace ts {
     }
     interface DocCommentTemplateOptions {
         readonly generateReturnInDocTemplate?: boolean;
+    }
+    interface InteractiveRefactorArguments {
+        targetFile: string;
     }
     interface SignatureHelpParameter {
         name: string;

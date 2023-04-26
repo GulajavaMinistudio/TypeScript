@@ -65,6 +65,8 @@ import {
     EntityName,
     equateValues,
     ExportDeclaration,
+    Extension,
+    extensionFromPath,
     FileReference,
     FileTextChanges,
     filter,
@@ -86,6 +88,7 @@ import {
     getAdjustedRenameLocation,
     getAllSuperTypeNodes,
     getAssignmentDeclarationKind,
+    getBaseFileName,
     GetCompletionsAtPositionOptions,
     getContainerNode,
     getDefaultLibFileName,
@@ -105,6 +108,7 @@ import {
     getNonAssignedNameOfDeclaration,
     getNormalizedAbsolutePath,
     getObjectFlags,
+    getQuotePreference,
     getScriptKind,
     getSetExternalModuleIndicator,
     getSnapshotText,
@@ -134,6 +138,7 @@ import {
     InlayHints,
     InlayHintsContext,
     insertSorted,
+    InteractiveRefactorArguments,
     InterfaceType,
     IntersectionType,
     isArray,
@@ -276,6 +281,7 @@ import {
     SourceFile,
     SourceFileLike,
     SourceMapSource,
+    startsWith,
     Statement,
     stringContains,
     StringLiteral,
@@ -319,6 +325,7 @@ import {
 } from "./_namespaces/ts";
 import * as NavigateTo from "./_namespaces/ts.NavigateTo";
 import * as NavigationBar from "./_namespaces/ts.NavigationBar";
+import { createNewFileName } from "./_namespaces/ts.refactor";
 import * as classifier from "./classifier";
 import * as classifier2020 from "./classifier2020";
 
@@ -2128,7 +2135,7 @@ export function createLanguageService(
         return DocumentHighlights.getDocumentHighlights(program, cancellationToken, sourceFile, position, sourceFilesToSearch);
     }
 
-    function findRenameLocations(fileName: string, position: number, findInStrings: boolean, findInComments: boolean, providePrefixAndSuffixTextForRename?: boolean): RenameLocation[] | undefined {
+    function findRenameLocations(fileName: string, position: number, findInStrings: boolean, findInComments: boolean, preferences?: UserPreferences | boolean): RenameLocation[] | undefined {
         synchronizeHostData();
         const sourceFile = getValidSourceFile(fileName);
         const node = getAdjustedRenameLocation(getTouchingPropertyName(sourceFile, position));
@@ -2145,8 +2152,10 @@ export function createLanguageService(
             });
         }
         else {
+            const quotePreference = getQuotePreference(sourceFile, preferences ?? emptyOptions);
+            const providePrefixAndSuffixTextForRename = typeof preferences === "boolean" ? preferences : preferences?.providePrefixAndSuffixTextForRename;
             return getReferencesWorker(node, position, { findInStrings, findInComments, providePrefixAndSuffixTextForRename, use: FindAllReferences.FindReferencesUse.Rename },
-                (entry, originalNode, checker) => FindAllReferences.toRenameLocation(entry, originalNode, checker, providePrefixAndSuffixTextForRename || false));
+                (entry, originalNode, checker) => FindAllReferences.toRenameLocation(entry, originalNode, checker, providePrefixAndSuffixTextForRename || false, quotePreference));
         }
     }
 
@@ -2987,6 +2996,19 @@ export function createLanguageService(
         return refactor.getApplicableRefactors(getRefactorContext(file, positionOrRange, preferences, emptyOptions, triggerReason, kind), includeInteractiveActions);
     }
 
+    function getMoveToRefactoringFileSuggestions(fileName: string, positionOrRange: number | TextRange, preferences: UserPreferences = emptyOptions): { newFileName: string, files: string[] } {
+        synchronizeHostData();
+        const sourceFile = getValidSourceFile(fileName);
+        const allFiles = Debug.checkDefined(program.getSourceFiles());
+        const extension = extensionFromPath(fileName);
+        const files = mapDefined(allFiles, file => !program?.isSourceFileFromExternalLibrary(sourceFile) &&
+                !(sourceFile === getValidSourceFile(file.fileName) || extension === Extension.Ts && extensionFromPath(file.fileName) === Extension.Dts || extension === Extension.Dts && startsWith(getBaseFileName(file.fileName), "lib.") && extensionFromPath(file.fileName) === Extension.Dts)
+                && extension === extensionFromPath(file.fileName) ? file.fileName : undefined);
+
+        const newFileName = createNewFileName(sourceFile, program, getRefactorContext(sourceFile, positionOrRange, preferences, emptyOptions), host);
+        return { newFileName, files };
+    }
+
     function getEditsForRefactor(
         fileName: string,
         formatOptions: FormatCodeSettings,
@@ -2994,10 +3016,11 @@ export function createLanguageService(
         refactorName: string,
         actionName: string,
         preferences: UserPreferences = emptyOptions,
+        interactiveRefactorArguments?: InteractiveRefactorArguments,
     ): RefactorEditInfo | undefined {
         synchronizeHostData();
         const file = getValidSourceFile(fileName);
-        return refactor.getEditsForRefactor(getRefactorContext(file, positionOrRange, preferences, formatOptions), refactorName, actionName);
+        return refactor.getEditsForRefactor(getRefactorContext(file, positionOrRange, preferences, formatOptions), refactorName, actionName, interactiveRefactorArguments);
     }
 
     function toLineColumnOffset(fileName: string, position: number): LineAndCharacter {
@@ -3094,6 +3117,7 @@ export function createLanguageService(
         updateIsDefinitionOfReferencedSymbols,
         getApplicableRefactors,
         getEditsForRefactor,
+        getMoveToRefactoringFileSuggestions,
         toLineColumnOffset,
         getSourceMapper: () => sourceMapper,
         clearSourceMapperCache: () => sourceMapper.clearCache(),
