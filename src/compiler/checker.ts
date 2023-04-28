@@ -2392,13 +2392,16 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function isDeprecatedSymbol(symbol: Symbol) {
-        if (length(symbol.declarations) > 1) {
-            const parentSymbol = getParentOfSymbol(symbol);
-            if (parentSymbol && parentSymbol.flags & SymbolFlags.Interface) {
-                return some(symbol.declarations, d => !!(getCombinedNodeFlags(d) & NodeFlags.Deprecated));
-            }
+        const parentSymbol = getParentOfSymbol(symbol);
+        if (parentSymbol && length(symbol.declarations) > 1) {
+            return parentSymbol.flags & SymbolFlags.Interface ? some(symbol.declarations, isDeprecatedDeclaration) : every(symbol.declarations, isDeprecatedDeclaration);
         }
-        return !!(getDeclarationNodeFlagsFromSymbol(symbol) & NodeFlags.Deprecated);
+        return !!symbol.valueDeclaration && isDeprecatedDeclaration(symbol.valueDeclaration)
+            || length(symbol.declarations) && every(symbol.declarations, isDeprecatedDeclaration);
+    }
+
+    function isDeprecatedDeclaration(declaration: Declaration) {
+        return !!(getCombinedNodeFlags(declaration) & NodeFlags.Deprecated);
     }
 
     function addDeprecatedSuggestion(location: Node, declarations: Node[], deprecatedEntity: string) {
@@ -14818,16 +14821,16 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         if (declaration.kind === SyntaxKind.Constructor) {
             return getDeclaredTypeOfClassOrInterface(getMergedSymbol((declaration.parent as ClassDeclaration).symbol));
         }
+        const typeNode = getEffectiveReturnTypeNode(declaration);
         if (isJSDocSignature(declaration)) {
             const root = getJSDocRoot(declaration);
-            if (root && isConstructorDeclaration(root.parent)) {
+            if (root && isConstructorDeclaration(root.parent) && !typeNode) {
                 return getDeclaredTypeOfClassOrInterface(getMergedSymbol((root.parent.parent as ClassDeclaration).symbol));
             }
         }
         if (isJSDocConstructSignature(declaration)) {
             return getTypeFromTypeNode((declaration.parameters[0] as ParameterDeclaration).type!); // TODO: GH#18217
         }
-        const typeNode = getEffectiveReturnTypeNode(declaration);
         if (typeNode) {
             return getTypeFromTypeNode(typeNode);
         }
@@ -27886,7 +27889,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
 
         const localOrExportSymbol = getExportSymbolOfValueSymbolIfExported(symbol);
-        const targetSymbol = checkDeprecatedAliasedSymbol(localOrExportSymbol, node);
+        const targetSymbol = resolveAliasWithDeprecationCheck(localOrExportSymbol, node);
         if (isDeprecatedSymbol(targetSymbol) && isUncalledFunctionReference(node, targetSymbol) && targetSymbol.declarations) {
             addDeprecatedSuggestion(node, targetSymbol.declarations, node.escapedText as string);
         }
@@ -29336,6 +29339,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function discriminateContextualTypeByJSXAttributes(node: JsxAttributes, contextualType: UnionType) {
+        const jsxChildrenPropertyName = getJsxElementChildrenPropertyName(getJsxNamespaceAt(node));
         return discriminateTypeByDiscriminableItems(contextualType,
             concatenate(
                 map(
@@ -29343,7 +29347,16 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     prop => ([!(prop as JsxAttribute).initializer ? (() => trueType) : (() => getContextFreeTypeOfExpression((prop as JsxAttribute).initializer!)), prop.symbol.escapedName] as [() => Type, __String])
                 ),
                 map(
-                    filter(getPropertiesOfType(contextualType), s => !!(s.flags & SymbolFlags.Optional) && !!node?.symbol?.members && !node.symbol.members.has(s.escapedName) && isDiscriminantProperty(contextualType, s.escapedName)),
+                    filter(getPropertiesOfType(contextualType), s => {
+                        if (!(s.flags & SymbolFlags.Optional) || !node?.symbol?.members) {
+                            return false;
+                        }
+                        const element = node.parent.parent;
+                        if (s.escapedName === jsxChildrenPropertyName && isJsxElement(element) && getSemanticJsxChildren(element.children).length) {
+                            return false;
+                        }
+                        return !node.symbol.members.has(s.escapedName) && isDiscriminantProperty(contextualType, s.escapedName);
+                    }),
                     s => [() => undefinedType, s.escapedName] as [() => Type, __String]
                 )
             ),
@@ -31540,8 +31553,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             }
         }
         else {
-            if (isDeprecatedSymbol(prop) && isUncalledFunctionReference(node, prop) && prop.declarations) {
-                addDeprecatedSuggestion(right, prop.declarations, right.escapedText as string);
+            const targetPropSymbol = resolveAliasWithDeprecationCheck(prop, right);
+            if (isDeprecatedSymbol(targetPropSymbol) && isUncalledFunctionReference(node, targetPropSymbol) && targetPropSymbol.declarations) {
+                addDeprecatedSuggestion(right, targetPropSymbol.declarations, right.escapedText as string);
             }
             checkPropertyNotUsedBeforeDeclaration(prop, node, right);
             markPropertyAsReferenced(prop, node, isSelfTypeAccess(left, parentSymbol));
@@ -44154,20 +44168,18 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             }
 
             if (isImportSpecifier(node)) {
-                const targetSymbol = checkDeprecatedAliasedSymbol(symbol, node);
-                if (isDeprecatedAliasedSymbol(targetSymbol) && targetSymbol.declarations) {
+                const targetSymbol = resolveAliasWithDeprecationCheck(symbol, node);
+                if (isDeprecatedSymbol(targetSymbol) && targetSymbol.declarations) {
                     addDeprecatedSuggestion(node, targetSymbol.declarations, targetSymbol.escapedName as string);
                 }
             }
         }
     }
 
-    function isDeprecatedAliasedSymbol(symbol: Symbol) {
-        return !!symbol.declarations && every(symbol.declarations, d => !!(getCombinedNodeFlags(d) & NodeFlags.Deprecated));
-    }
-
-    function checkDeprecatedAliasedSymbol(symbol: Symbol, location: Node) {
-        if (!(symbol.flags & SymbolFlags.Alias)) return symbol;
+    function resolveAliasWithDeprecationCheck(symbol: Symbol, location: Node) {
+        if (!(symbol.flags & SymbolFlags.Alias) || isDeprecatedSymbol(symbol) || !getDeclarationOfAliasSymbol(symbol)) {
+            return symbol;
+        }
 
         const targetSymbol = resolveAlias(symbol);
         if (targetSymbol === unknownSymbol) return targetSymbol;
@@ -44177,7 +44189,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             if (target) {
                 if (target === targetSymbol) break;
                 if (target.declarations && length(target.declarations)) {
-                    if (isDeprecatedAliasedSymbol(target)) {
+                    if (isDeprecatedSymbol(target)) {
                         addDeprecatedSuggestion(location, target.declarations, target.escapedName as string);
                         break;
                     }
