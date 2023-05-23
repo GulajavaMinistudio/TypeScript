@@ -14046,7 +14046,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             else if (type !== firstType) {
                 checkFlags |= CheckFlags.HasNonUniformType;
             }
-            if (isLiteralType(type) || isPatternLiteralType(type) || type === uniqueLiteralType) {
+            if (isLiteralType(type) || isPatternLiteralType(type)) {
                 checkFlags |= CheckFlags.HasLiteralType;
             }
             if (type.flags & TypeFlags.Never && type !== uniqueLiteralType) {
@@ -18837,25 +18837,16 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 case SyntaxKind.TypeQuery:
                     const entityName = (node as TypeQueryNode).exprName;
                     const firstIdentifier = getFirstIdentifier(entityName);
-                    const firstIdentifierSymbol = getResolvedSymbol(firstIdentifier);
-                    const tpDeclaration = tp.symbol.declarations![0]; // There is exactly one declaration, otherwise `containsReference` is not called
-                    let tpScope: Node;
-                    if (tpDeclaration.kind === SyntaxKind.TypeParameter) { // Type parameter is a regular type parameter, e.g. foo<T>
-                        tpScope = tpDeclaration.parent;
-                    }
-                    else if (tp.isThisType) {
-                         // Type parameter is the this type, and its declaration is the class declaration.
-                        tpScope = tpDeclaration;
-                    }
-                    else {
-                        // Type parameter's declaration was unrecognized.
-                        // This could happen if the type parameter comes from e.g. a JSDoc annotation, so we default to returning true.
-                        return true;
-                    }
-
-                    if (firstIdentifierSymbol.declarations) {
-                        return some(firstIdentifierSymbol.declarations, idDecl => isNodeDescendantOf(idDecl, tpScope)) ||
-                            some((node as TypeQueryNode).typeArguments, containsReference);
+                    if (!isThisIdentifier(firstIdentifier)) { // Don't attempt to analyze typeof this.xxx
+                        const firstIdentifierSymbol = getResolvedSymbol(firstIdentifier);
+                        const tpDeclaration = tp.symbol.declarations![0]; // There is exactly one declaration, otherwise `containsReference` is not called
+                        const tpScope = tpDeclaration.kind === SyntaxKind.TypeParameter ? tpDeclaration.parent : // Type parameter is a regular type parameter, e.g. foo<T>
+                            tp.isThisType ? tpDeclaration : // Type parameter is the this type, and its declaration is the class declaration.
+                            undefined; // Type parameter's declaration was unrecognized, e.g. comes from JSDoc annotation.
+                        if (firstIdentifierSymbol.declarations && tpScope) {
+                            return some(firstIdentifierSymbol.declarations, idDecl => isNodeDescendantOf(idDecl, tpScope)) ||
+                                some((node as TypeQueryNode).typeArguments, containsReference);
+                        }
                     }
                     return true;
                 case SyntaxKind.MethodDeclaration:
@@ -22999,7 +22990,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     function getRecursionIdentity(type: Type): object {
         // Object and array literals are known not to contain recursive references and don't need a recursion identity.
         if (type.flags & TypeFlags.Object && !isObjectOrArrayLiteralType(type)) {
-            if (getObjectFlags(type) && ObjectFlags.Reference && (type as TypeReference).node) {
+            if (getObjectFlags(type) & ObjectFlags.Reference && (type as TypeReference).node) {
                 // Deferred type references are tracked through their associated AST node. This gives us finer
                 // granularity than using their associated target because each manifest type reference has a
                 // unique AST node.
@@ -38343,6 +38334,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     case "length":
                     case "caller":
                     case "arguments":
+                        if (compilerOptions.useDefineForClassFields) {
+                            break;
+                        }
+                        // fall through
                     case "prototype":
                         const message = Diagnostics.Static_property_0_conflicts_with_built_in_property_Function_0_of_constructor_function_1;
                         const className = getNameOfSymbolAsWritten(getSymbolOfDeclaration(node));
