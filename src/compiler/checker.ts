@@ -3040,8 +3040,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 // (it refers to the constant type of the expression instead)
                 return undefined;
             }
-            if (isModuleDeclaration(location) && lastLocation && location.name === lastLocation) {
-                // If this is the name of a namespace, skip the parent since it will have is own locals that could
+            if (isModuleOrEnumDeclaration(location) && lastLocation && location.name === lastLocation) {
+                // If lastLocation is the name of a namespace or enum, skip the parent since it will have is own locals that could
                 // conflict.
                 lastLocation = location;
                 location = location.parent;
@@ -12472,7 +12472,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     }
                 }
             }
-            const assignments = symbol.assignmentDeclarationMembers;
+            const assignments = (symbol.valueDeclaration?.kind === SyntaxKind.ArrowFunction || symbol.valueDeclaration?.kind === SyntaxKind.FunctionExpression) &&
+                getSymbolOfNode(symbol.valueDeclaration.parent)?.assignmentDeclarationMembers ||
+                symbol.assignmentDeclarationMembers;
+
             if (assignments) {
                 const decls = arrayFrom(assignments.values());
                 for (const member of decls) {
@@ -27175,14 +27178,16 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                         return narrowTypeByPrivateIdentifierInInExpression(type, expr, assumeTrue);
                     }
                     const target = getReferenceCandidate(expr.right);
-                    const leftType = getTypeOfExpression(expr.left);
-                    if (leftType.flags & TypeFlags.StringOrNumberLiteralOrUnique) {
-                        if (containsMissingType(type) && isAccessExpression(reference) && isMatchingReference(reference.expression, target) &&
-                            getAccessedPropertyName(reference) === getPropertyNameFromType(leftType as StringLiteralType | NumberLiteralType | UniqueESSymbolType)) {
+                    if (containsMissingType(type) && isAccessExpression(reference) && isMatchingReference(reference.expression, target)) {
+                        const leftType = getTypeOfExpression(expr.left);
+                        if (isTypeUsableAsPropertyName(leftType) && getAccessedPropertyName(reference) === getPropertyNameFromType(leftType)) {
                             return getTypeWithFacts(type, assumeTrue ? TypeFacts.NEUndefined : TypeFacts.EQUndefined);
                         }
-                        if (isMatchingReference(reference, target)) {
-                            return narrowTypeByInKeyword(type, leftType as StringLiteralType | NumberLiteralType | UniqueESSymbolType, assumeTrue);
+                    }
+                    if (isMatchingReference(reference, target)) {
+                        const leftType = getTypeOfExpression(expr.left);
+                        if (isTypeUsableAsPropertyName(leftType)) {
+                            return narrowTypeByInKeyword(type, leftType, assumeTrue);
                         }
                     }
                     break;
@@ -33488,7 +33493,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             parameters.push(createCombinedSymbolFromTypes(symbols, mapDefined(candidates, candidate => tryGetTypeAtPosition(candidate, i))));
         }
         const restParameterSymbols = mapDefined(candidates, c => signatureHasRestParameter(c) ? last(c.parameters) : undefined);
-        let flags = SignatureFlags.None;
+        let flags = SignatureFlags.IsSignatureCandidateForOverloadFailure;
         if (restParameterSymbols.length !== 0) {
             const type = createArrayType(getUnionType(mapDefined(candidates, tryGetRestTypeOfSignature), UnionReduction.Subtype));
             parameters.push(createCombinedSymbolForOverloadFailure(restParameterSymbols, type));
@@ -34386,6 +34391,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function checkDeprecatedSignature(signature: Signature, node: CallLikeExpression) {
+        if (signature.flags & SignatureFlags.IsSignatureCandidateForOverloadFailure) return;
         if (signature.declaration && signature.declaration.flags & NodeFlags.Deprecated) {
             const suggestionNode = getDeprecatedSuggestionNode(node);
             const name = tryGetPropertyAccessOrIdentifierToString(getInvokedExpression(node));
