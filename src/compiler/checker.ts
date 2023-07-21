@@ -335,6 +335,7 @@ import {
     getParseTreeNode,
     getPropertyAssignmentAliasLikeExpression,
     getPropertyNameForPropertyNameNode,
+    getPropertyNameFromType,
     getResolutionDiagnostic,
     getResolutionModeOverrideForClause,
     getResolvedExternalModuleName,
@@ -729,6 +730,7 @@ import {
     isTypeQueryNode,
     isTypeReferenceNode,
     isTypeReferenceType,
+    isTypeUsableAsPropertyName,
     isUMDExportSymbol,
     isValidBigIntString,
     isValidESSymbolDeclaration,
@@ -1538,7 +1540,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             return node ? getTypeFromTypeNode(node) : errorType;
         },
         getParameterType: getTypeAtPosition,
-        getParameterIdentifierNameAtPosition,
+        getParameterIdentifierInfoAtPosition,
         getPromisedTypeOfPromise,
         getAwaitedType: type => getAwaitedType(type),
         getReturnTypeOfSignature,
@@ -10750,7 +10752,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             }
         }
         const widened = getWidenedType(addOptionality(type, /*isProperty*/ false, definedInMethod && !definedInConstructor));
-        if (symbol.valueDeclaration && filterType(widened, t => !!(t.flags & ~TypeFlags.Nullable)) === neverType) {
+        if (symbol.valueDeclaration && isInJSFile(symbol.valueDeclaration) && filterType(widened, t => !!(t.flags & ~TypeFlags.Nullable)) === neverType) {
             reportImplicitAny(symbol.valueDeclaration, anyType);
             return anyType;
         }
@@ -12287,13 +12289,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     /**
-     * Indicates whether a type can be used as a property name.
-     */
-    function isTypeUsableAsPropertyName(type: Type): type is StringLiteralType | NumberLiteralType | UniqueESSymbolType {
-        return !!(type.flags & TypeFlags.StringOrNumberLiteralOrUnique);
-    }
-
-    /**
      * Indicates whether a declaration name is definitely late-bindable.
      * A declaration name is only late-bindable if:
      * - It is a `ComputedPropertyName`.
@@ -12336,19 +12331,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
      */
     function isNonBindableDynamicName(node: DeclarationName) {
         return isDynamicName(node) && !isLateBindableName(node);
-    }
-
-    /**
-     * Gets the symbolic name for a member from its type.
-     */
-    function getPropertyNameFromType(type: StringLiteralType | NumberLiteralType | UniqueESSymbolType): __String {
-        if (type.flags & TypeFlags.UniqueESSymbol) {
-            return (type as UniqueESSymbolType).escapedName;
-        }
-        if (type.flags & (TypeFlags.StringLiteral | TypeFlags.NumberLiteral)) {
-            return escapeLeadingUnderscores("" + (type as StringLiteralType | NumberLiteralType).value);
-        }
-        return Debug.fail();
     }
 
     /**
@@ -13072,19 +13054,16 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             return;
         }
         // Combinations of function, class, enum and module
-        let members = emptySymbols;
+        let members = getExportsOfSymbol(symbol);
         let indexInfos: IndexInfo[] | undefined;
-        if (symbol.exports) {
-            members = getExportsOfSymbol(symbol);
-            if (symbol === globalThisSymbol) {
-                const varsOnly = new Map<__String, Symbol>();
-                members.forEach(p => {
-                    if (!(p.flags & SymbolFlags.BlockScoped) && !(p.flags & SymbolFlags.ValueModule && p.declarations?.length && every(p.declarations, isAmbientModule))) {
-                        varsOnly.set(p.escapedName, p);
-                    }
-                });
-                members = varsOnly;
-            }
+        if (symbol === globalThisSymbol) {
+            const varsOnly = new Map<__String, Symbol>();
+            members.forEach(p => {
+                if (!(p.flags & SymbolFlags.BlockScoped) && !(p.flags & SymbolFlags.ValueModule && p.declarations?.length && every(p.declarations, isAmbientModule))) {
+                    varsOnly.set(p.escapedName, p);
+                }
+            });
+            members = varsOnly;
         }
         let baseConstructorIndexInfo: IndexInfo | undefined;
         setStructuredTypeMembers(type, members, emptyArray, emptyArray, emptyArray);
@@ -34856,18 +34835,24 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return restParameter.escapedName;
     }
 
-    function getParameterIdentifierNameAtPosition(signature: Signature, pos: number): [parameterName: __String, isRestParameter: boolean] | undefined {
+    function getParameterIdentifierInfoAtPosition(signature: Signature, pos: number): { parameter: Identifier, parameterName: __String, isRestParameter: boolean } | undefined {
         if (signature.declaration?.kind === SyntaxKind.JSDocFunctionType) {
             return undefined;
         }
         const paramCount = signature.parameters.length - (signatureHasRestParameter(signature) ? 1 : 0);
         if (pos < paramCount) {
             const param = signature.parameters[pos];
-            return isParameterDeclarationWithIdentifierName(param) ? [param.escapedName, false] : undefined;
+            const paramIdent = getParameterDeclarationIdentifier(param);
+            return paramIdent ? {
+                parameter: paramIdent,
+                parameterName: param.escapedName,
+                isRestParameter: false
+            } : undefined;
         }
 
         const restParameter = signature.parameters[paramCount] || unknownSymbol;
-        if (!isParameterDeclarationWithIdentifierName(restParameter)) {
+        const restIdent = getParameterDeclarationIdentifier(restParameter);
+        if (!restIdent) {
             return undefined;
         }
 
@@ -34877,20 +34862,23 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             const index = pos - paramCount;
             const associatedName = associatedNames?.[index];
             const isRestTupleElement = !!associatedName?.dotDotDotToken;
-            return associatedName ? [
-                getTupleElementLabel(associatedName),
-                isRestTupleElement
-            ] : undefined;
+
+            if (associatedName) {
+                Debug.assert(isIdentifier(associatedName.name));
+                return { parameter: associatedName.name, parameterName: associatedName.name.escapedText, isRestParameter: isRestTupleElement };
+            }
+
+            return undefined;
         }
 
         if (pos === paramCount) {
-            return [restParameter.escapedName, true];
+            return { parameter: restIdent, parameterName: restParameter.escapedName, isRestParameter: true };
         }
         return undefined;
     }
 
-    function isParameterDeclarationWithIdentifierName(symbol: Symbol) {
-        return symbol.valueDeclaration && isParameter(symbol.valueDeclaration) && isIdentifier(symbol.valueDeclaration.name);
+    function getParameterDeclarationIdentifier(symbol: Symbol) {
+        return symbol.valueDeclaration && isParameter(symbol.valueDeclaration) && isIdentifier(symbol.valueDeclaration.name) && symbol.valueDeclaration.name;
     }
     function isValidDeclarationForTupleLabel(d: Declaration): d is NamedTupleMember | (ParameterDeclaration & { name: Identifier }) {
         return d.kind === SyntaxKind.NamedTupleMember || (isParameter(d) && d.name && isIdentifier(d.name));
