@@ -14888,8 +14888,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return getReturnTypeOfTypeTag(declaration);
     }
 
-    function isResolvingReturnTypeOfSignature(signature: Signature) {
-        return !signature.resolvedReturnType && findResolutionCycleStartIndex(signature, TypeSystemPropertyName.ResolvedReturnType) >= 0;
+    function isResolvingReturnTypeOfSignature(signature: Signature): boolean {
+        return signature.compositeSignatures && some(signature.compositeSignatures, isResolvingReturnTypeOfSignature) ||
+            !signature.resolvedReturnType && findResolutionCycleStartIndex(signature, TypeSystemPropertyName.ResolvedReturnType) >= 0;
     }
 
     function getRestTypeOfSignature(signature: Signature): Type {
@@ -21713,17 +21714,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     // slower, fuller, this-instantiated check (necessary when comparing raw `this` types from base classes), see `subclassWithPolymorphicThisIsAssignable.ts` test for example
                     else if (result = isRelatedTo(getTypeWithThisArgument(constraint, source), target, RecursionFlags.Source, reportErrors && constraint !== unknownType && !(targetFlags & sourceFlags & TypeFlags.TypeParameter), /*headMessage*/ undefined, intersectionState)) {
                         return result;
-                    }
-                    if (sourceFlags & TypeFlags.IndexedAccess) {
-                        const indexType = (source as IndexedAccessType).indexType;
-                        if (indexType.flags & TypeFlags.Index) {
-                            const unresolvedIndexConstraint = getBaseConstraintOfType((indexType as IndexType).type);
-                            const indexConstraint = unresolvedIndexConstraint && unresolvedIndexConstraint !== noConstraintType ? getIndexType(unresolvedIndexConstraint) : keyofConstraintType;
-                            const constraint = getIndexedAccessType((source as IndexedAccessType).objectType, indexConstraint);
-                            if (result = isRelatedTo(constraint, target, RecursionFlags.Source, /*reportErrors*/ false, /*headMessage*/ undefined, intersectionState)) {
-                                return result;
-                            }
-                        }
                     }
                     if (isMappedTypeGenericIndexedAccess(source)) {
                         // For an indexed access type { [P in K]: E}[X], above we have already explored an instantiation of E with X
