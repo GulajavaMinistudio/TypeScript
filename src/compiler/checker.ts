@@ -274,6 +274,7 @@ import {
     getEmitModuleKind,
     getEmitModuleResolutionKind,
     getEmitScriptTarget,
+    getEmitStandardClassFields,
     getEnclosingBlockScopeContainer,
     getEnclosingContainer,
     getEntityNameFromTypeNode,
@@ -564,6 +565,7 @@ import {
     isInternalModuleImportEqualsDeclaration,
     isInTopLevelContext,
     isIntrinsicJsxName,
+    isInTypeQuery,
     isIterationStatement,
     isJSDocAllType,
     isJSDocAugmentsTag,
@@ -1436,6 +1438,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     var moduleKind = getEmitModuleKind(compilerOptions);
     var legacyDecorators = !!compilerOptions.experimentalDecorators;
     var useDefineForClassFields = getUseDefineForClassFields(compilerOptions);
+    var emitStandardClassFields = getEmitStandardClassFields(compilerOptions);
     var allowSyntheticDefaultImports = getAllowSyntheticDefaultImports(compilerOptions);
     var strictNullChecks = getStrictOptionValue(compilerOptions, "strictNullChecks");
     var strictFunctionTypes = getStrictOptionValue(compilerOptions, "strictFunctionTypes");
@@ -2784,8 +2787,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 return !isPropertyImmediatelyReferencedWithinDeclaration(declaration, usage, /*stopAtAnyPropertyDeclaration*/ false);
             }
             else if (isParameterPropertyDeclaration(declaration, declaration.parent)) {
-                // foo = this.bar is illegal in esnext+useDefineForClassFields when bar is a parameter property
-                return !(getEmitScriptTarget(compilerOptions) === ScriptTarget.ESNext && useDefineForClassFields
+                // foo = this.bar is illegal in emitStandardClassFields when bar is a parameter property
+                return !(emitStandardClassFields
                          && getContainingClass(declaration) === getContainingClass(usage)
                          && isUsedInFunctionOrInstanceProperty(usage, declaration));
             }
@@ -2797,7 +2800,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         // 1. inside an export specifier
         // 2. inside a function
         // 3. inside an instance property initializer, a reference to a non-instance property
-        //    (except when target: "esnext" and useDefineForClassFields: true and the reference is to a parameter property)
+        //    (except when emitStandardClassFields: true and the reference is to a parameter property)
         // 4. inside a static property initializer, a reference to a static method in the same class
         // 5. inside a TS export= declaration (since we will move the export statement during emit to avoid TDZ)
         // or if usage is in a type context:
@@ -2816,7 +2819,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             return true;
         }
         if (isUsedInFunctionOrInstanceProperty(usage, declaration)) {
-            if (getEmitScriptTarget(compilerOptions) >= ScriptTarget.ES2022 && useDefineForClassFields
+            if (emitStandardClassFields
                 && getContainingClass(declaration)
                 && (isPropertyDeclaration(declaration) || isParameterPropertyDeclaration(declaration, declaration.parent))) {
                 return !isPropertyImmediatelyReferencedWithinDeclaration(declaration, usage, /*stopAtAnyPropertyDeclaration*/ true);
@@ -2973,7 +2976,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 case SyntaxKind.PropertyDeclaration:
                     // static properties in classes introduce temporary variables
                     if (hasStaticModifier(node)) {
-                        return target < ScriptTarget.ESNext || !useDefineForClassFields;
+                        return !emitStandardClassFields;
                     }
                     return requiresScopeChangeWorker((node as PropertyDeclaration).name);
                 default:
@@ -3391,10 +3394,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         // 1. When result is undefined, after checking for a missing "this."
         // 2. When result is defined
         function checkAndReportErrorForInvalidInitializer() {
-            if (propertyWithInvalidInitializer && !(useDefineForClassFields && getEmitScriptTarget(compilerOptions) >= ScriptTarget.ES2022)) {
+            if (propertyWithInvalidInitializer && !emitStandardClassFields) {
                 // We have a match, but the reference occurred within a property initializer and the identifier also binds
                 // to a local variable in the constructor where the code will be emitted. Note that this is actually allowed
-                // with ESNext+useDefineForClassFields because the scope semantics are different.
+                // with emitStandardClassFields because the scope semantics are different.
                 error(errorLocation,
                     errorLocation && propertyWithInvalidInitializer.type && textRangeContainsPositionInclusive(propertyWithInvalidInitializer.type, errorLocation.pos)
                         ? Diagnostics.Type_of_instance_member_variable_0_cannot_reference_identifier_1_declared_in_the_constructor
@@ -16277,6 +16280,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return type.elementFlags.length - findLastIndex(type.elementFlags, f => !(f & flags)) - 1;
     }
 
+    function getTotalFixedElementCount(type: TupleType) {
+        return type.fixedLength + getEndElementCount(type, ElementFlags.Fixed);
+    }
+
     function getElementTypes(type: TupleTypeReference): readonly Type[] {
         const typeArguments = getTypeArguments(type);
         const arity = getTypeReferenceArity(type);
@@ -17402,10 +17409,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 }
                 if (index >= 0) {
                     errorIfWritingToReadonlyIndex(getIndexInfoOfType(objectType, numberType));
-                    return mapType(objectType, t => {
-                        const restType = getRestTypeOfTupleType(t as TupleTypeReference) || undefinedType;
-                        return accessFlags & AccessFlags.IncludeUndefined ? getUnionType([restType, missingType]) : restType;
-                    });
+                    return getTupleElementTypeOutOfStartCount(objectType, index, accessFlags & AccessFlags.IncludeUndefined ? missingType : undefined);
                 }
             }
         }
@@ -17745,8 +17749,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         // preserve backwards compatibility. For example, an element access 'this["foo"]' has always been resolved
         // eagerly using the constraint type of 'this' at the given location.
         if (isGenericIndexType(indexType) || (accessNode && accessNode.kind !== SyntaxKind.IndexedAccessType ?
-            isGenericTupleType(objectType) && !indexTypeLessThan(indexType, objectType.target.fixedLength) :
-            isGenericObjectType(objectType) && !(isTupleType(objectType) && indexTypeLessThan(indexType, objectType.target.fixedLength)) || isGenericReducibleType(objectType))) {
+            isGenericTupleType(objectType) && !indexTypeLessThan(indexType, getTotalFixedElementCount(objectType.target)) :
+            isGenericObjectType(objectType) && !(isTupleType(objectType) && indexTypeLessThan(indexType, getTotalFixedElementCount(objectType.target))) || isGenericReducibleType(objectType))) {
             if (objectType.flags & TypeFlags.AnyOrUnknown) {
                 return objectType;
             }
@@ -23325,18 +23329,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             return propType;
         }
         if (everyType(type, isTupleType)) {
-            return mapType(type, t => {
-                const tupleType = t as TupleTypeReference;
-                const restType = getRestTypeOfTupleType(tupleType);
-                if (!restType) {
-                    return undefinedType;
-                }
-                if (compilerOptions.noUncheckedIndexedAccess &&
-                    index >= tupleType.target.fixedLength + getEndElementCount(tupleType.target, ElementFlags.Fixed)) {
-                    return getUnionType([restType, undefinedType]);
-                }
-                return restType;
-            });
+            return getTupleElementTypeOutOfStartCount(type, index, compilerOptions.noUncheckedIndexedAccess ? undefinedType : undefined);
         }
         return undefined;
     }
@@ -23452,6 +23445,20 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
     function getRestTypeOfTupleType(type: TupleTypeReference) {
         return getElementTypeOfSliceOfTupleType(type, type.target.fixedLength);
+    }
+
+    function getTupleElementTypeOutOfStartCount(type: Type, index: number, undefinedOrMissingType: Type | undefined) {
+        return mapType(type, t => {
+            const tupleType = t as TupleTypeReference;
+            const restType = getRestTypeOfTupleType(tupleType);
+            if (!restType) {
+                return undefinedType;
+            }
+            if (undefinedOrMissingType && index >= getTotalFixedElementCount(tupleType.target)) {
+                return getUnionType([restType, undefinedOrMissingType]);
+            }
+            return restType;
+        });
     }
 
     function getRestArrayTypeOfTupleType(type: TupleTypeReference) {
@@ -25366,15 +25373,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     /*excludeGlobals*/ false) || unknownSymbol;
         }
         return links.resolvedSymbol;
-    }
-
-    function isInTypeQuery(node: Node): boolean {
-        // TypeScript 1.0 spec (April 2014): 3.6.3
-        // A type query consists of the keyword typeof followed by an expression.
-        // The expression is restricted to a single identifier or a sequence of identifiers separated by periods
-        return !!findAncestor(
-            node,
-            n => n.kind === SyntaxKind.TypeQuery ? true : n.kind === SyntaxKind.Identifier || n.kind === SyntaxKind.QualifiedName ? false : "quit");
     }
 
     function isInAmbientOrTypeNode(node: Node): boolean {
@@ -31743,7 +31741,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             && !(isAccessExpression(node) && isAccessExpression(node.expression))
             && !isBlockScopedNameDeclaredBeforeUse(valueDeclaration, right)
             && !(isMethodDeclaration(valueDeclaration) && getCombinedModifierFlagsCached(valueDeclaration) & ModifierFlags.Static)
-            && (compilerOptions.useDefineForClassFields || !isPropertyDeclaredInAncestorClass(prop))) {
+            && (useDefineForClassFields || !isPropertyDeclaredInAncestorClass(prop))) {
             diagnosticMessage = error(right, Diagnostics.Property_0_is_used_before_its_initialization, declarationName);
         }
         else if (valueDeclaration.kind === SyntaxKind.ClassDeclaration &&
@@ -38457,7 +38455,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     case "length":
                     case "caller":
                     case "arguments":
-                        if (compilerOptions.useDefineForClassFields) {
+                        if (useDefineForClassFields) {
                             break;
                         }
                         // fall through
@@ -38662,7 +38660,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     //   or the containing class declares instance member variables with initializers.
 
                     const superCallShouldBeRootLevel =
-                        (getEmitScriptTarget(compilerOptions) !== ScriptTarget.ESNext || !useDefineForClassFields) &&
+                        !emitStandardClassFields &&
                         (some((node.parent as ClassDeclaration).members, isInstancePropertyWithInitializerOrPrivateIdentifierProperty) ||
                         some(node.parameters, p => hasSyntacticModifier(p, ModifierFlags.ParameterPropertyModifier)));
 
@@ -42939,7 +42937,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             !legacyDecorators && languageVersion < ScriptTarget.ESNext &&
             classOrConstructorParameterIsDecorated(/*useLegacyDecorators*/ false, node);
         const willTransformPrivateElementsOrClassStaticBlocks = languageVersion <= ScriptTarget.ES2022;
-        const willTransformInitializers = !useDefineForClassFields || languageVersion < ScriptTarget.ES2022;
+        const willTransformInitializers = !emitStandardClassFields;
         if (willTransformStaticElementsOfDecoratedClass || willTransformPrivateElementsOrClassStaticBlocks) {
             for (const member of node.members) {
                 if (willTransformStaticElementsOfDecoratedClass && classElementOrClassElementParameterIsDecorated(/*useLegacyDecorators*/ false, member, node)) {
