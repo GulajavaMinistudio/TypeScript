@@ -554,6 +554,7 @@ import {
     isImportOrExportSpecifier,
     isImportSpecifier,
     isImportTypeNode,
+    isInCompoundLikeAssignment,
     isIndexedAccessTypeNode,
     isInExpressionContext,
     isInfinityOrNaNString,
@@ -8082,7 +8083,14 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
         function isStringNamed(d: Declaration) {
             const name = getNameOfDeclaration(d);
-            return !!name && isStringLiteral(name);
+            if (!name) {
+                return false;
+            }
+            if (isComputedPropertyName(name)) {
+                const type = checkExpression(name.expression);
+                return !!(type.flags & TypeFlags.StringLike);
+            }
+            return isStringLiteral(name);
         }
 
         function isSingleQuotedStringNamed(d: Declaration) {
@@ -11534,7 +11542,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     getWriteTypeOfSymbolWithDeferredType(symbol) || getTypeOfSymbolWithDeferredType(symbol) :
                     // NOTE: cast to TransientSymbol should be safe because only TransientSymbols can have CheckFlags.SyntheticProperty
                     (symbol as TransientSymbol).links.writeType || (symbol as TransientSymbol).links.type! :
-                getTypeOfSymbol(symbol);
+                removeMissingType(getTypeOfSymbol(symbol), !!(symbol.flags & SymbolFlags.Optional));
         }
         if (symbol.flags & SymbolFlags.Accessor) {
             return checkFlags & CheckFlags.Instantiated ?
@@ -22778,7 +22786,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             findMostOverlappyType(source, target);
     }
 
-    function discriminateTypeByDiscriminableItems(target: UnionType, discriminators: [() => Type, __String][], related: (source: Type, target: Type) => boolean | Ternary) {
+    function discriminateTypeByDiscriminableItems(target: UnionType, discriminators: (readonly [() => Type, __String])[], related: (source: Type, target: Type) => boolean | Ternary) {
         const types = target.types;
         const include: Ternary[] = types.map(t => t.flags & TypeFlags.Primitive ? Ternary.False : Ternary.True);
         for (const [getDiscriminatingType, propertyName] of discriminators) {
@@ -24484,7 +24492,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         let bivariant = false;
         let propagationType: Type;
         let inferencePriority: number = InferencePriority.MaxValue;
-        let allowComplexConstraintInference = true;
         let visited: Map<string, number>;
         let sourceStack: Type[];
         let targetStack: Type[];
@@ -24690,15 +24697,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     // getApparentType can return _any_ type, since an indexed access or conditional may simplify to any other type.
                     // If that occurs and it doesn't simplify to an object or intersection, we'll need to restart `inferFromTypes`
                     // with the simplified source.
-                    if (apparentSource !== source && allowComplexConstraintInference && !(apparentSource.flags & (TypeFlags.Object | TypeFlags.Intersection))) {
-                        // TODO: The `allowComplexConstraintInference` flag is a hack! This forbids inference from complex constraints within constraints!
-                        // This isn't required algorithmically, but rather is used to lower the memory burden caused by performing inference
-                        // that is _too good_ in projects with complicated constraints (eg, fp-ts). In such cases, if we did not limit ourselves
-                        // here, we might produce more valid inferences for types, causing us to do more checks and perform more instantiations
-                        // (in addition to the extra stack depth here) which, in turn, can push the already close process over its limit.
-                        // TL;DR: If we ever become generally more memory efficient (or our resource budget ever increases), we should just
-                        // remove this `allowComplexConstraintInference` flag.
-                        allowComplexConstraintInference = false;
+                    if (apparentSource !== source && !(apparentSource.flags & (TypeFlags.Object | TypeFlags.Intersection))) {
                         return inferFromTypes(apparentSource, target);
                     }
                     source = apparentSource;
@@ -26731,10 +26730,11 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     const assignedType = getWidenedLiteralType(getInitialOrAssignedType(flow));
                     return isTypeAssignableTo(assignedType, declaredType) ? assignedType : anyArrayType;
                 }
-                if (declaredType.flags & TypeFlags.Union) {
-                    return getAssignmentReducedType(declaredType as UnionType, getInitialOrAssignedType(flow));
+                const t = isInCompoundLikeAssignment(node) ? getBaseTypeOfLiteralType(declaredType) : declaredType;
+                if (t.flags & TypeFlags.Union) {
+                    return getAssignmentReducedType(t as UnionType, getInitialOrAssignedType(flow));
                 }
-                return declaredType;
+                return t;
             }
             // We didn't have a direct match. However, if the reference is a dotted name, this
             // may be an assignment to a left hand part of the reference. For example, for a
@@ -27705,7 +27705,11 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 location = location.parent;
             }
             if (isExpressionNode(location) && (!isAssignmentTarget(location) || isWriteAccess(location))) {
-                const type = removeOptionalTypeMarker(getTypeOfExpression(location as Expression));
+                const type = removeOptionalTypeMarker(
+                    isWriteAccess(location) && location.kind === SyntaxKind.PropertyAccessExpression ?
+                        checkPropertyAccessExpression(location as PropertyAccessExpression, /*checkMode*/ undefined, /*writeOnly*/ true) :
+                        getTypeOfExpression(location as Expression)
+                );
                 if (getExportSymbolOfValueSymbolIfExported(getNodeLinks(location).resolvedSymbol) === symbol) {
                     return type;
                 }
@@ -28077,7 +28081,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         // entities we simply return the declared type.
         if (localOrExportSymbol.flags & SymbolFlags.Variable) {
             if (assignmentKind === AssignmentKind.Definite) {
-                return type;
+                return isInCompoundLikeAssignment(node) ? getBaseTypeOfLiteralType(type) : type;
             }
         }
         else if (isAlias) {
@@ -29440,12 +29444,23 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return getMatchingUnionConstituentForObjectLiteral(contextualType, node) || discriminateTypeByDiscriminableItems(contextualType,
             concatenate(
                 map(
-                    filter(node.properties, p => !!p.symbol && p.kind === SyntaxKind.PropertyAssignment && isPossiblyDiscriminantValue(p.initializer) && isDiscriminantProperty(contextualType, p.symbol.escapedName)),
-                    prop => ([() => getContextFreeTypeOfExpression((prop as PropertyAssignment).initializer), prop.symbol.escapedName] as [() => Type, __String])
+                    filter(node.properties, (p): p is PropertyAssignment | ShorthandPropertyAssignment => {
+                        if (!p.symbol) {
+                            return false;
+                        }
+                        if (p.kind === SyntaxKind.PropertyAssignment) {
+                            return isPossiblyDiscriminantValue(p.initializer) && isDiscriminantProperty(contextualType, p.symbol.escapedName);
+                        }
+                        if (p.kind === SyntaxKind.ShorthandPropertyAssignment) {
+                            return isDiscriminantProperty(contextualType, p.symbol.escapedName);
+                        }
+                        return false;
+                    }),
+                    prop => ([() => getContextFreeTypeOfExpression(prop.kind === SyntaxKind.PropertyAssignment ? prop.initializer : prop.name), prop.symbol.escapedName] as const)
                 ),
                 map(
                     filter(getPropertiesOfType(contextualType), s => !!(s.flags & SymbolFlags.Optional) && !!node?.symbol?.members && !node.symbol.members.has(s.escapedName) && isDiscriminantProperty(contextualType, s.escapedName)),
-                    s => [() => undefinedType, s.escapedName] as [() => Type, __String]
+                    s => [() => undefinedType, s.escapedName] as const
                 )
             ),
             isTypeAssignableTo
@@ -29458,7 +29473,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             concatenate(
                 map(
                     filter(node.properties, p => !!p.symbol && p.kind === SyntaxKind.JsxAttribute && isDiscriminantProperty(contextualType, p.symbol.escapedName) && (!p.initializer || isPossiblyDiscriminantValue(p.initializer))),
-                    prop => ([!(prop as JsxAttribute).initializer ? (() => trueType) : (() => getContextFreeTypeOfExpression((prop as JsxAttribute).initializer!)), prop.symbol.escapedName] as [() => Type, __String])
+                    prop => ([!(prop as JsxAttribute).initializer ? (() => trueType) : (() => getContextFreeTypeOfExpression((prop as JsxAttribute).initializer!)), prop.symbol.escapedName] as const)
                 ),
                 map(
                     filter(getPropertiesOfType(contextualType), s => {
@@ -29471,7 +29486,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                         }
                         return !node.symbol.members.has(s.escapedName) && isDiscriminantProperty(contextualType, s.escapedName);
                     }),
-                    s => [() => undefinedType, s.escapedName] as [() => Type, __String]
+                    s => [() => undefinedType, s.escapedName] as const
                 )
             ),
             isTypeAssignableTo
