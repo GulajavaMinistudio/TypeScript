@@ -16392,10 +16392,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             // [...X[]] is equivalent to just X[]
             return readonly ? globalReadonlyArrayType : globalArrayType;
         }
-        const memberIds = mapDefined(namedMemberDeclarations, node => node ? getNodeId(node) : undefined);
         const key = map(elementFlags, f => f & ElementFlags.Required ? "#" : f & ElementFlags.Optional ? "?" : f & ElementFlags.Rest ? "." : "*").join() +
             (readonly ? "R" : "") +
-            (memberIds.length ? "," + memberIds.join(",") : "");
+            (some(namedMemberDeclarations, node => !!node) ? "," + map(namedMemberDeclarations, node => node ? getNodeId(node) : "_").join(",") : "");
         let type = tupleTypes.get(key);
         if (!type) {
             tupleTypes.set(key, type = createTupleTargetType(elementFlags, readonly, namedMemberDeclarations));
@@ -23484,10 +23483,18 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 // unique AST node.
                 return (type as TypeReference).node!;
             }
-            if (type.symbol && !(getObjectFlags(type) & ObjectFlags.Anonymous && type.symbol.flags & SymbolFlags.Class)) {
-                // We track all object types that have an associated symbol (representing the origin of the type), but
-                // exclude the static side of classes from this check since it shares its symbol with the instance side.
-                return type.symbol;
+            if (type.symbol) {
+                // We track object types that have a symbol by that symbol (representing the origin of the type).
+                if (getObjectFlags(type) & ObjectFlags.Mapped) {
+                    // When a homomorphic mapped type is applied to a type with a symbol, we use the symbol of that
+                    // type as the recursion identity. This is a better strategy than using the symbol of the mapped
+                    // type, which doesn't work well for recursive mapped types.
+                    type = getMappedTargetWithSymbol(type);
+                }
+                if (!(getObjectFlags(type) & ObjectFlags.Anonymous && type.symbol.flags & SymbolFlags.Class)) {
+                    // We exclude the static side of a class since it shares its symbol with the instance side.
+                    return type.symbol;
+                }
             }
             if (isTupleType(type)) {
                 return type.target;
@@ -23509,6 +23516,14 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             return (type as ConditionalType).root;
         }
         return type;
+    }
+
+    function getMappedTargetWithSymbol(type: Type) {
+        let target = type;
+        while ((getObjectFlags(target) & ObjectFlags.InstantiatedMapped) === ObjectFlags.InstantiatedMapped && isMappedTypeWithKeyofConstraintDeclaration(target as MappedType)) {
+            target = getModifiersTypeFromMappedType(target as MappedType);
+        }
+        return target.symbol ? target : type;
     }
 
     function isPropertyIdenticalTo(sourceProp: Symbol, targetProp: Symbol): boolean {
