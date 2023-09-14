@@ -7259,8 +7259,8 @@ export function isRightSideOfQualifiedNameOrPropertyAccess(node: Node) {
 
 /** @internal */
 export function isRightSideOfAccessExpression(node: Node) {
-    return isPropertyAccessExpression(node.parent) && node.parent.name === node
-        || isElementAccessExpression(node.parent) && node.parent.argumentExpression === node;
+    return !!node.parent && (isPropertyAccessExpression(node.parent) && node.parent.name === node
+        || isElementAccessExpression(node.parent) && node.parent.argumentExpression === node);
 }
 
 /** @internal */
@@ -10451,4 +10451,9 @@ export function getPropertyNameFromType(type: StringLiteralType | NumberLiteralT
         return escapeLeadingUnderscores("" + (type as StringLiteralType | NumberLiteralType).value);
     }
     return Debug.fail();
+}
+
+/** @internal */
+export function isExpandoPropertyDeclaration(declaration: Declaration | undefined): declaration is PropertyAccessExpression | ElementAccessExpression | BinaryExpression {
+    return !!declaration && (isPropertyAccessExpression(declaration) || isElementAccessExpression(declaration) || isBinaryExpression(declaration));
 }
