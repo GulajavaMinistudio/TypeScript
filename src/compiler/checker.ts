@@ -10513,14 +10513,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return prop ? getTypeOfSymbol(prop) : undefined;
     }
 
-    function getTypeOfPropertyOrIndexSignature(type: Type, name: __String): Type {
-        return getTypeOfPropertyOfType(type, name) || getApplicableIndexInfoForName(type, name)?.type || unknownType;
-    }
-
     /**
-     * Similar to `getTypeOfPropertyOrIndexSignature`,
-     * but returns `undefined` if there is no matching property or index signature,
-     * and adds optionality to index signature types.
+     * Return the type of the matching property or index signature in the given type, or undefined
+     * if no matching property or index signature exists. Add optionality to index signature types.
      */
     function getTypeOfPropertyOrIndexSignatureOfType(type: Type, name: __String): Type | undefined {
         let propType;
@@ -10681,10 +10676,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     function getTypeForBindingElement(declaration: BindingElement): Type | undefined {
         const checkMode = declaration.dotDotDotToken ? CheckMode.RestBindingElement : CheckMode.Normal;
         const parentType = getTypeForBindingElementParent(declaration.parent.parent, checkMode);
-        return parentType && getBindingElementTypeFromParentType(declaration, parentType);
+        return parentType && getBindingElementTypeFromParentType(declaration, parentType, /*noTupleBoundsCheck*/ false);
     }
 
-    function getBindingElementTypeFromParentType(declaration: BindingElement, parentType: Type): Type {
+    function getBindingElementTypeFromParentType(declaration: BindingElement, parentType: Type, noTupleBoundsCheck: boolean): Type {
         // If an any type was inferred for parent, infer that for the binding element
         if (isTypeAny(parentType)) {
             return parentType;
@@ -10740,7 +10735,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             }
             else if (isArrayLikeType(parentType)) {
                 const indexType = getNumberLiteralType(index);
-                const accessFlags = AccessFlags.ExpressionPosition | (hasDefaultValue(declaration) ? AccessFlags.NoTupleBoundsCheck : 0);
+                const accessFlags = AccessFlags.ExpressionPosition | (noTupleBoundsCheck || hasDefaultValue(declaration) ? AccessFlags.NoTupleBoundsCheck : 0);
                 const declaredType = getIndexedAccessTypeOrUndefined(parentType, indexType, accessFlags, declaration.name) || errorType;
                 type = getFlowTypeOfDestructuring(declaration, declaredType);
             }
@@ -12074,7 +12069,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     /**
      * The base constructor of a class can resolve to
      * * undefinedType if the class has no extends clause,
-     * * unknownType if an error occurred during resolution of the extends expression,
+     * * errorType if an error occurred during resolution of the extends expression,
      * * nullType if the extends expression is the null value,
      * * anyType if the extends expression has type any, or
      * * an object type with at least one construct signature.
@@ -27587,7 +27582,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             propType = removeNullable && optionalChain ? getOptionalType(propType) : propType;
             const narrowedPropType = narrowType(propType);
             return filterType(type, t => {
-                const discriminantType = getTypeOfPropertyOrIndexSignature(t, propName);
+                const discriminantType = getTypeOfPropertyOrIndexSignatureOfType(t, propName) || unknownType;
                 return !(discriminantType.flags & TypeFlags.Never) && !(narrowedPropType.flags & TypeFlags.Never) && areTypesComparable(narrowedPropType, discriminantType);
             });
         }
@@ -28445,7 +28440,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                             if (narrowedType.flags & TypeFlags.Never) {
                                 return neverType;
                             }
-                            return getBindingElementTypeFromParentType(declaration, narrowedType);
+                            // Destructurings are validated against the parent type elsewhere. Here we disable tuple bounds
+                            // checks because the narrowed type may have lower arity than the full parent type. For example,
+                            // for the declaration [x, y]: [1, 2] | [3], we may have narrowed the parent type to just [3].
+                            return getBindingElementTypeFromParentType(declaration, narrowedType, /*noTupleBoundsCheck*/ true);
                         }
                     }
                 }
@@ -28819,7 +28817,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
      * Otherwise, return false
      * @param classDecl a class declaration to check if it extends null
      */
-    function classDeclarationExtendsNull(classDecl: ClassDeclaration): boolean {
+    function classDeclarationExtendsNull(classDecl: ClassLikeDeclaration): boolean {
         const classSymbol = getSymbolOfDeclaration(classDecl);
         const classInstanceType = getDeclaredTypeOfSymbol(classSymbol) as InterfaceType;
         const baseConstructorType = getBaseConstructorTypeOfClass(classInstanceType);
@@ -29227,6 +29225,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         if (!getClassExtendsHeritageElement(classLikeDeclaration)) {
             error(node, Diagnostics.super_can_only_be_referenced_in_a_derived_class);
             return errorType;
+        }
+
+        if (classDeclarationExtendsNull(classLikeDeclaration)) {
+            return isCallExpression ? errorType : nullWideningType;
         }
 
         const classType = getDeclaredTypeOfSymbol(getSymbolOfDeclaration(classLikeDeclaration)) as InterfaceType;
@@ -35745,7 +35747,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     function assignBindingElementTypes(pattern: BindingPattern, parentType: Type) {
         for (const element of pattern.elements) {
             if (!isOmittedExpression(element)) {
-                const type = getBindingElementTypeFromParentType(element, parentType);
+                const type = getBindingElementTypeFromParentType(element, parentType, /*noTupleBoundsCheck*/ false);
                 if (element.name.kind === SyntaxKind.Identifier) {
                     getSymbolLinks(getSymbolOfDeclaration(element)).type = type;
                 }
@@ -39279,7 +39281,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             // TS 1.0 spec (April 2014): 8.3.2
             // Constructors of classes with no extends clause may not contain super calls, whereas
             // constructors of derived classes must contain at least one super call somewhere in their function body.
-            const containingClassDecl = node.parent as ClassDeclaration;
+            const containingClassDecl = node.parent;
             if (getClassExtendsHeritageElement(containingClassDecl)) {
                 captureLexicalThis(node.parent, containingClassDecl);
                 const classExtendsNull = classDeclarationExtendsNull(containingClassDecl);
@@ -39295,7 +39297,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     //   or the containing class declares instance member variables with initializers.
 
                     const superCallShouldBeRootLevel = !emitStandardClassFields &&
-                        (some((node.parent as ClassDeclaration).members, isInstancePropertyWithInitializerOrPrivateIdentifierProperty) ||
+                        (some(node.parent.members, isInstancePropertyWithInitializerOrPrivateIdentifierProperty) ||
                             some(node.parameters, p => hasSyntacticModifier(p, ModifierFlags.ParameterPropertyModifier)));
 
                     if (superCallShouldBeRootLevel) {
