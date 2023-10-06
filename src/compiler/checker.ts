@@ -4022,7 +4022,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function isSyntacticDefault(node: Node) {
-        return ((isExportAssignment(node) && !node.isExportEquals) || hasSyntacticModifier(node, ModifierFlags.Default) || isExportSpecifier(node));
+        return ((isExportAssignment(node) && !node.isExportEquals)
+            || hasSyntacticModifier(node, ModifierFlags.Default)
+            || isExportSpecifier(node)
+            || isNamespaceExport(node));
     }
 
     function getUsageModeForExpression(usage: Expression) {
@@ -7289,6 +7292,30 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             const propertyName = getPropertyNameNodeForSymbol(propertySymbol, context);
             context.enclosingDeclaration = saveEnclosingDeclaration;
             context.approximateLength += symbolName(propertySymbol).length + 1;
+
+            if (propertySymbol.flags & SymbolFlags.Accessor) {
+                const writeType = getWriteTypeOfSymbol(propertySymbol);
+                if (propertyType !== writeType) {
+                    const getterDeclaration = getDeclarationOfKind<GetAccessorDeclaration>(propertySymbol, SyntaxKind.GetAccessor)!;
+                    const getterSignature = getSignatureFromDeclaration(getterDeclaration);
+                    typeElements.push(
+                        setCommentRange(
+                            signatureToSignatureDeclarationHelper(getterSignature, SyntaxKind.GetAccessor, context, { name: propertyName }) as GetAccessorDeclaration,
+                            getterDeclaration,
+                        ),
+                    );
+                    const setterDeclaration = getDeclarationOfKind<SetAccessorDeclaration>(propertySymbol, SyntaxKind.SetAccessor)!;
+                    const setterSignature = getSignatureFromDeclaration(setterDeclaration);
+                    typeElements.push(
+                        setCommentRange(
+                            signatureToSignatureDeclarationHelper(setterSignature, SyntaxKind.SetAccessor, context, { name: propertyName }) as SetAccessorDeclaration,
+                            setterDeclaration,
+                        ),
+                    );
+                    return;
+                }
+            }
+
             const optionalToken = propertySymbol.flags & SymbolFlags.Optional ? factory.createToken(SyntaxKind.QuestionToken) : undefined;
             if (propertySymbol.flags & (SymbolFlags.Function | SymbolFlags.Method) && !getPropertiesOfObjectType(propertyType).length && !isReadonlySymbol(propertySymbol)) {
                 const signatures = getSignaturesOfType(filterType(propertyType, t => !(t.flags & TypeFlags.Undefined)), SignatureKind.Call);
@@ -7329,9 +7356,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             typeElements.push(preserveCommentsOn(propertySignature));
 
             function preserveCommentsOn<T extends Node>(node: T) {
-                if (some(propertySymbol.declarations, d => d.kind === SyntaxKind.JSDocPropertyTag)) {
-                    const d = propertySymbol.declarations?.find(d => d.kind === SyntaxKind.JSDocPropertyTag)! as JSDocPropertyTag;
-                    const commentText = getTextOfJSDocComment(d.comment);
+                const jsdocPropertyTag = propertySymbol.declarations?.find((d): d is JSDocPropertyTag => d.kind === SyntaxKind.JSDocPropertyTag);
+                if (jsdocPropertyTag) {
+                    const commentText = getTextOfJSDocComment(jsdocPropertyTag.comment);
                     if (commentText) {
                         setSyntheticLeadingComments(node, [{ kind: SyntaxKind.MultiLineCommentTrivia, text: "*\n * " + commentText.replace(/\n/g, "\n * ") + "\n ", pos: -1, end: -1, hasTrailingNewLine: true }]);
                     }
@@ -9795,7 +9822,15 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     !(typeToSerialize.symbol && some(typeToSerialize.symbol.declarations, d => getSourceFileOfNode(d) !== ctxSrc)) &&
                     !some(getPropertiesOfType(typeToSerialize), p => isLateBoundName(p.escapedName)) &&
                     !some(getPropertiesOfType(typeToSerialize), p => some(p.declarations, d => getSourceFileOfNode(d) !== ctxSrc)) &&
-                    every(getPropertiesOfType(typeToSerialize), p => isIdentifierText(symbolName(p), languageVersion));
+                    every(getPropertiesOfType(typeToSerialize), p => {
+                        if (!isIdentifierText(symbolName(p), languageVersion)) {
+                            return false;
+                        }
+                        if (!(p.flags & SymbolFlags.Accessor)) {
+                            return true;
+                        }
+                        return getNonMissingTypeOfSymbol(p) === getWriteTypeOfSymbol(p);
+                    });
             }
 
             function makeSerializePropertySymbol<T extends Node>(
@@ -31261,7 +31296,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         // Handle children attribute
         const parent = openingLikeElement.parent.kind === SyntaxKind.JsxElement ? openingLikeElement.parent as JsxElement : undefined;
         // We have to check that openingElement of the parent is the one we are visiting as this may not be true for selfClosingElement
-        if (parent && parent.openingElement === openingLikeElement && parent.children.length > 0) {
+        if (parent && parent.openingElement === openingLikeElement && getSemanticJsxChildren(parent.children).length > 0) {
             const childrenTypes: Type[] = checkJsxChildren(parent, checkMode);
 
             if (!hasSpreadAnyType && jsxChildrenPropertyName && jsxChildrenPropertyName !== "") {
@@ -33356,8 +33391,11 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             if (arg.kind === SyntaxKind.SyntheticExpression && (arg as SyntheticExpression).tupleNameSource) {
                 names.push((arg as SyntheticExpression).tupleNameSource!);
             }
+            else {
+                names.push(undefined);
+            }
         }
-        return createTupleType(types, flags, inConstContext && !someType(restType, isMutableArrayLikeType), length(names) === length(types) ? names : undefined);
+        return createTupleType(types, flags, inConstContext && !someType(restType, isMutableArrayLikeType), names);
     }
 
     function checkTypeArguments(signature: Signature, typeArgumentNodes: readonly TypeNode[], reportErrors: boolean, headMessage?: DiagnosticMessage): Type[] | undefined {
@@ -35741,12 +35779,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 types.push(restType);
                 flags.push(ElementFlags.Variadic);
             }
-            const name = getNameableDeclarationAtPosition(source, i);
-            if (name) {
-                names.push(name);
-            }
+            names.push(getNameableDeclarationAtPosition(source, i));
         }
-        return createTupleType(types, flags, readonly, length(names) === length(types) ? names : undefined);
+        return createTupleType(types, flags, readonly, names);
     }
 
     // Return the number of parameters in a signature. The rest parameter, if present, counts as one
