@@ -8386,6 +8386,18 @@ declare namespace ts {
         createExportDefault(expression: Expression): ExportAssignment;
         createExternalModuleExport(exportName: Identifier): ExportDeclaration;
         restoreOuterExpressions(outerExpression: Expression | undefined, innerExpression: Expression, kinds?: OuterExpressionKinds): Expression;
+        /**
+         * Updates a node that may contain modifiers, replacing only the modifiers of the node.
+         */
+        replaceModifiers<T extends HasModifiers>(node: T, modifiers: readonly Modifier[] | ModifierFlags | undefined): T;
+        /**
+         * Updates a node that may contain decorators or modifiers, replacing only the decorators and modifiers of the node.
+         */
+        replaceDecoratorsAndModifiers<T extends HasModifiers & HasDecorators>(node: T, modifiers: readonly ModifierLike[] | undefined): T;
+        /**
+         * Updates a node that contains a property name, replacing only the name of the node.
+         */
+        replacePropertyName<T extends AccessorDeclaration | MethodDeclaration | MethodSignature | PropertyDeclaration | PropertySignature | PropertyAssignment>(node: T, name: T["name"]): T;
     }
     interface CoreTransformationContext {
         readonly factory: NodeFactory;
@@ -8742,6 +8754,7 @@ declare namespace ts {
         readonly interactiveInlayHints?: boolean;
         readonly allowRenameOfImportPath?: boolean;
         readonly autoImportFileExcludePatterns?: string[];
+        readonly preferTypeOnlyAutoImports?: boolean;
         readonly organizeImportsIgnoreCase?: "auto" | boolean;
         readonly organizeImportsCollation?: "ordinal" | "unicode";
         readonly organizeImportsLocale?: string;
