@@ -7532,9 +7532,6 @@ export const enum CharacterCodes {
     mathematicalSpace = 0x205F,
     ogham = 0x1680,
 
-    // Unicode replacement character produced when a byte sequence is invalid
-    replacementCharacter = 0xFFFD,
-
     _ = 0x5F,
     $ = 0x24,
 
@@ -7752,10 +7749,10 @@ export interface ResolvedModuleWithFailedLookupLocations {
     resolutionDiagnostics?: Diagnostic[];
     /**
      * @internal
-     * Used to issue a diagnostic if typings for a non-relative import couldn't be found
-     * while respecting package.json `exports`, but were found when disabling `exports`.
+     * Used to issue a better diagnostic when an unresolvable module may
+     * have been resolvable under different module resolution settings.
      */
-    node10Result?: string;
+    alternateResult?: string;
 }
 
 export interface ResolvedTypeReferenceDirective {
