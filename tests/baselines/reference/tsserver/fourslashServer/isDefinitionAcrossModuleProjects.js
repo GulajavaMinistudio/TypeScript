@@ -315,6 +315,8 @@ Projects::
 /tsconfig.json (Configured) *new*
     projectStateVersion: 1
     projectProgramVersion: 0
+    dirty: true
+    noOpenRef: true
 
 ScriptInfos::
 /a/index.ts (Open) *new*
@@ -563,6 +565,8 @@ Projects::
 /tsconfig.json (Configured) *changed*
     projectStateVersion: 1
     projectProgramVersion: 1 *changed*
+    dirty: false *changed*
+    noOpenRef: true
 
 Info seq  [hh:mm:ss:mss] request:
     {
@@ -975,18 +979,28 @@ watchedFiles::
   {"pollingInterval":2000}
 
 Projects::
-/a/tsconfig.json (Configured)
+/a/tsconfig.json (Configured) *changed*
     projectStateVersion: 1
     projectProgramVersion: 1
+    originalConfiguredProjects: 2 *changed*
+        /c/tsconfig.json *new*
+        /a/tsconfig.json *new*
 /a2/tsconfig.json (Configured) *new*
     projectStateVersion: 1
     projectProgramVersion: 1
+    noOpenRef: true
+    originalConfiguredProjects: 3
+        /c/tsconfig.json
+        /a/tsconfig.json
+        /a2/tsconfig.json
 /c/tsconfig.json (Configured) *new*
     projectStateVersion: 1
     projectProgramVersion: 1
+    noOpenRef: true
 /tsconfig.json (Configured)
     projectStateVersion: 1
     projectProgramVersion: 1
+    noOpenRef: true
 
 ScriptInfos::
 /a/index.ts (Open)
@@ -1211,6 +1225,30 @@ watchedFiles::
 watchedFiles *deleted*::
 /a2/index.ts:
   {"pollingInterval":500}
+
+Projects::
+/a/tsconfig.json (Configured)
+    projectStateVersion: 1
+    projectProgramVersion: 1
+    originalConfiguredProjects: 2
+        /c/tsconfig.json
+        /a/tsconfig.json
+/a2/tsconfig.json (Configured) *changed*
+    projectStateVersion: 1
+    projectProgramVersion: 1
+    noOpenRef: false *changed*
+    originalConfiguredProjects: 3
+        /c/tsconfig.json
+        /a/tsconfig.json
+        /a2/tsconfig.json
+/c/tsconfig.json (Configured)
+    projectStateVersion: 1
+    projectProgramVersion: 1
+    noOpenRef: true
+/tsconfig.json (Configured)
+    projectStateVersion: 1
+    projectProgramVersion: 1
+    noOpenRef: true
 
 ScriptInfos::
 /a/index.ts (Open)
@@ -1678,6 +1716,31 @@ Info seq  [hh:mm:ss:mss] response:
         }
       ]
     }
+After Request
+Projects::
+/a/tsconfig.json (Configured) *changed*
+    projectStateVersion: 1
+    projectProgramVersion: 1
+    originalConfiguredProjects: 3 *changed*
+        /c/tsconfig.json
+        /a/tsconfig.json
+        /a2/tsconfig.json *new*
+/a2/tsconfig.json (Configured)
+    projectStateVersion: 1
+    projectProgramVersion: 1
+    originalConfiguredProjects: 3
+        /c/tsconfig.json
+        /a/tsconfig.json
+        /a2/tsconfig.json
+/c/tsconfig.json (Configured)
+    projectStateVersion: 1
+    projectProgramVersion: 1
+    noOpenRef: true
+/tsconfig.json (Configured)
+    projectStateVersion: 1
+    projectProgramVersion: 1
+    noOpenRef: true
+
 Info seq  [hh:mm:ss:mss] request:
     {
       "seq": 7,
@@ -1930,18 +1993,28 @@ Projects::
 /a/tsconfig.json (Configured)
     projectStateVersion: 1
     projectProgramVersion: 1
+    originalConfiguredProjects: 3
+        /c/tsconfig.json
+        /a/tsconfig.json
+        /a2/tsconfig.json
 /a2/tsconfig.json (Configured)
     projectStateVersion: 1
     projectProgramVersion: 1
+    originalConfiguredProjects: 3
+        /c/tsconfig.json
+        /a/tsconfig.json
+        /a2/tsconfig.json
 /b/tsconfig.json (Configured) *new*
     projectStateVersion: 1
     projectProgramVersion: 1
 /c/tsconfig.json (Configured)
     projectStateVersion: 1
     projectProgramVersion: 1
+    noOpenRef: true
 /tsconfig.json (Configured)
     projectStateVersion: 1
     projectProgramVersion: 1
+    noOpenRef: true
 
 ScriptInfos::
 /a/index.ts (Open)
@@ -2128,6 +2201,35 @@ watchedFiles::
   {"pollingInterval":2000}
 /tsconfig.settings.json:
   {"pollingInterval":2000}
+
+Projects::
+/a/tsconfig.json (Configured) *changed*
+    projectStateVersion: 1
+    projectProgramVersion: 1
+    originalConfiguredProjects: 4 *changed*
+        /c/tsconfig.json
+        /a/tsconfig.json
+        /a2/tsconfig.json
+        /b/tsconfig.json *new*
+/a2/tsconfig.json (Configured) *changed*
+    projectStateVersion: 1
+    projectProgramVersion: 1
+    originalConfiguredProjects: 4 *changed*
+        /c/tsconfig.json
+        /a/tsconfig.json
+        /a2/tsconfig.json
+        /b/tsconfig.json *new*
+/b/tsconfig.json (Configured)
+    projectStateVersion: 1
+    projectProgramVersion: 1
+/c/tsconfig.json (Configured)
+    projectStateVersion: 1
+    projectProgramVersion: 1
+    noOpenRef: true
+/tsconfig.json (Configured)
+    projectStateVersion: 1
+    projectProgramVersion: 1
+    noOpenRef: true
 
 Info seq  [hh:mm:ss:mss] request:
     {
@@ -2428,6 +2530,35 @@ watchedFiles::
 watchedFiles *deleted*::
 /c/index.ts:
   {"pollingInterval":500}
+
+Projects::
+/a/tsconfig.json (Configured)
+    projectStateVersion: 1
+    projectProgramVersion: 1
+    originalConfiguredProjects: 4
+        /c/tsconfig.json
+        /a/tsconfig.json
+        /a2/tsconfig.json
+        /b/tsconfig.json
+/a2/tsconfig.json (Configured)
+    projectStateVersion: 1
+    projectProgramVersion: 1
+    originalConfiguredProjects: 4
+        /c/tsconfig.json
+        /a/tsconfig.json
+        /a2/tsconfig.json
+        /b/tsconfig.json
+/b/tsconfig.json (Configured)
+    projectStateVersion: 1
+    projectProgramVersion: 1
+/c/tsconfig.json (Configured) *changed*
+    projectStateVersion: 1
+    projectProgramVersion: 1
+    noOpenRef: false *changed*
+/tsconfig.json (Configured)
+    projectStateVersion: 1
+    projectProgramVersion: 1
+    noOpenRef: true
 
 ScriptInfos::
 /a/index.ts (Open)

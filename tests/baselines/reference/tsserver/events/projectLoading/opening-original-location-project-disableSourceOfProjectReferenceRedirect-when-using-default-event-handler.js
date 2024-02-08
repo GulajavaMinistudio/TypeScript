@@ -461,9 +461,12 @@ Projects::
 /user/username/projects/a/tsconfig.json (Configured) *new*
     projectStateVersion: 1
     projectProgramVersion: 1
-/user/username/projects/b/tsconfig.json (Configured)
+    noOpenRef: true
+/user/username/projects/b/tsconfig.json (Configured) *changed*
     projectStateVersion: 1
     projectProgramVersion: 1
+    originalConfiguredProjects: 1 *changed*
+        /user/username/projects/a/tsconfig.json *new*
 
 ScriptInfos::
 /a/lib/lib.d.ts *changed*

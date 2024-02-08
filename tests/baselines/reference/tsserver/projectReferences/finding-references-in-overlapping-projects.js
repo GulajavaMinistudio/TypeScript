@@ -319,6 +319,8 @@ Projects::
 /user/username/projects/solution/tsconfig.json (Configured) *new*
     projectStateVersion: 1
     projectProgramVersion: 0
+    dirty: true
+    noOpenRef: true
 
 ScriptInfos::
 /a/lib/lib.d.ts *new*
@@ -987,18 +989,36 @@ Projects::
 /user/username/projects/solution/a/tsconfig.json (Configured) *new*
     projectStateVersion: 1
     projectProgramVersion: 1
-/user/username/projects/solution/b/tsconfig.json (Configured)
+    noOpenRef: true
+/user/username/projects/solution/b/tsconfig.json (Configured) *changed*
     projectStateVersion: 1
     projectProgramVersion: 1
+    originalConfiguredProjects: 2 *changed*
+        /user/username/projects/solution/a/tsconfig.json *new*
+        /user/username/projects/solution/b/tsconfig.json *new*
 /user/username/projects/solution/c/tsconfig.json (Configured) *new*
     projectStateVersion: 1
     projectProgramVersion: 1
+    noOpenRef: true
+    originalConfiguredProjects: 4
+        /user/username/projects/solution/a/tsconfig.json
+        /user/username/projects/solution/b/tsconfig.json
+        /user/username/projects/solution/c/tsconfig.json
+        /user/username/projects/solution/d/tsconfig.json
 /user/username/projects/solution/d/tsconfig.json (Configured) *new*
     projectStateVersion: 1
     projectProgramVersion: 1
+    noOpenRef: true
+    originalConfiguredProjects: 4
+        /user/username/projects/solution/a/tsconfig.json
+        /user/username/projects/solution/b/tsconfig.json
+        /user/username/projects/solution/c/tsconfig.json
+        /user/username/projects/solution/d/tsconfig.json
 /user/username/projects/solution/tsconfig.json (Configured) *changed*
     projectStateVersion: 1
     projectProgramVersion: 1 *changed*
+    dirty: false *changed*
+    noOpenRef: true
 
 ScriptInfos::
 /a/lib/lib.d.ts *changed*
@@ -1213,3 +1233,39 @@ Info seq  [hh:mm:ss:mss] response:
       "responseRequired": true
     }
 After request
+
+Projects::
+/user/username/projects/solution/a/tsconfig.json (Configured)
+    projectStateVersion: 1
+    projectProgramVersion: 1
+    noOpenRef: true
+/user/username/projects/solution/b/tsconfig.json (Configured) *changed*
+    projectStateVersion: 1
+    projectProgramVersion: 1
+    originalConfiguredProjects: 4 *changed*
+        /user/username/projects/solution/a/tsconfig.json
+        /user/username/projects/solution/b/tsconfig.json
+        /user/username/projects/solution/c/tsconfig.json *new*
+        /user/username/projects/solution/d/tsconfig.json *new*
+/user/username/projects/solution/c/tsconfig.json (Configured)
+    projectStateVersion: 1
+    projectProgramVersion: 1
+    noOpenRef: true
+    originalConfiguredProjects: 4
+        /user/username/projects/solution/a/tsconfig.json
+        /user/username/projects/solution/b/tsconfig.json
+        /user/username/projects/solution/c/tsconfig.json
+        /user/username/projects/solution/d/tsconfig.json
+/user/username/projects/solution/d/tsconfig.json (Configured)
+    projectStateVersion: 1
+    projectProgramVersion: 1
+    noOpenRef: true
+    originalConfiguredProjects: 4
+        /user/username/projects/solution/a/tsconfig.json
+        /user/username/projects/solution/b/tsconfig.json
+        /user/username/projects/solution/c/tsconfig.json
+        /user/username/projects/solution/d/tsconfig.json
+/user/username/projects/solution/tsconfig.json (Configured)
+    projectStateVersion: 1
+    projectProgramVersion: 1
+    noOpenRef: true
