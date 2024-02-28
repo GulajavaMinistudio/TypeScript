@@ -3054,6 +3054,7 @@ declare namespace ts {
                 Lf = "Lf",
             }
             enum ScriptTarget {
+                /** @deprecated */
                 ES3 = "ES3",
                 ES5 = "ES5",
                 ES6 = "ES6",
@@ -4139,7 +4140,7 @@ declare namespace ts {
             responseRequired?: boolean;
         }
     }
-    const versionMajorMinor = "5.4";
+    const versionMajorMinor = "5.5";
     /** The version of the TypeScript compiler release */
     const version: string;
     /**
@@ -7695,6 +7696,7 @@ declare namespace ts {
         Deferred = 7,
     }
     enum ScriptTarget {
+        /** @deprecated */
         ES3 = 0,
         ES5 = 1,
         ES2015 = 2,
