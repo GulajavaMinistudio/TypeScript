@@ -651,6 +651,7 @@ import {
     isNewExpression,
     isNodeDescendantOf,
     isNonNullAccess,
+    isNonNullExpression,
     isNullishCoalesce,
     isNumericLiteral,
     isNumericLiteralName,
@@ -17641,7 +17642,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             const typeVarIndex = typeSet[0].flags & TypeFlags.TypeVariable ? 0 : 1;
             const typeVariable = typeSet[typeVarIndex];
             const primitiveType = typeSet[1 - typeVarIndex];
-            if (typeVariable.flags & TypeFlags.TypeVariable && (primitiveType.flags & (TypeFlags.Primitive | TypeFlags.NonPrimitive) || includes & TypeFlags.IncludesEmptyObject)) {
+            if (
+                typeVariable.flags & TypeFlags.TypeVariable &&
+                (primitiveType.flags & (TypeFlags.Primitive | TypeFlags.NonPrimitive) && !isGenericStringLikeType(primitiveType) || includes & TypeFlags.IncludesEmptyObject)
+            ) {
                 // We have an intersection T & P or P & T, where T is a type variable and P is a primitive type, the object type, or {}.
                 const constraint = getBaseConstraintOfType(typeVariable);
                 // Check that T's constraint is similarly composed of primitive types, the object type, or {}.
@@ -17979,6 +17983,16 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
         if (contains(types, wildcardType)) {
             return wildcardType;
+        }
+        if (
+            texts.length === 2 && texts[0] === "" && texts[1] === ""
+            // literals (including string enums) are stringified below
+            && !(types[0].flags & TypeFlags.Literal)
+            // infer T extends StringLike can't be unwrapped eagerly
+            && !types[0].symbol?.declarations?.some(d => d.parent.kind === SyntaxKind.InferType)
+            && isTypeAssignableTo(types[0], stringType)
+        ) {
+            return types[0];
         }
         const newTypes: Type[] = [];
         const newTexts: string[] = [];
@@ -18388,6 +18402,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             !!(type.flags & TypeFlags.StringMapping) && isPatternLiteralPlaceholderType((type as StringMappingType).type);
     }
 
+    function isGenericStringLikeType(type: Type) {
+        return !!(type.flags & (TypeFlags.TemplateLiteral | TypeFlags.StringMapping)) && !isPatternLiteralType(type);
+    }
+
     function isGenericType(type: Type): boolean {
         return !!getGenericObjectFlags(type);
     }
@@ -18416,7 +18434,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             return (type as SubstitutionType).objectFlags & ObjectFlags.IsGenericType;
         }
         return (type.flags & TypeFlags.InstantiableNonPrimitive || isGenericMappedType(type) || isGenericTupleType(type) ? ObjectFlags.IsGenericObjectType : 0) |
-            (type.flags & (TypeFlags.InstantiableNonPrimitive | TypeFlags.Index | TypeFlags.TemplateLiteral | TypeFlags.StringMapping) && !isPatternLiteralType(type) ? ObjectFlags.IsGenericIndexType : 0);
+            (type.flags & (TypeFlags.InstantiableNonPrimitive | TypeFlags.Index) || isGenericStringLikeType(type) ? ObjectFlags.IsGenericIndexType : 0);
     }
 
     function getSimplifiedType(type: Type, writing: boolean): Type {
@@ -34446,7 +34464,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     function getDecoratorArgumentCount(node: Decorator, signature: Signature) {
         return compilerOptions.experimentalDecorators ?
             getLegacyDecoratorArgumentCount(node, signature) :
-            2;
+            // Allow the runtime to oversupply arguments to an ES decorator as long as there's at least one parameter.
+            Math.min(Math.max(getParameterCount(signature), 1), 2);
     }
 
     /**
@@ -41572,8 +41591,82 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
     }
 
+    function checkGrammarDecorator(decorator: Decorator): boolean {
+        const sourceFile = getSourceFileOfNode(decorator);
+        if (!hasParseDiagnostics(sourceFile)) {
+            let node: Expression = decorator.expression;
+
+            // DecoratorParenthesizedExpression :
+            //   `(` Expression `)`
+
+            if (isParenthesizedExpression(node)) {
+                return false;
+            }
+
+            let canHaveCallExpression = true;
+            let errorNode: Node | undefined;
+            while (true) {
+                // Allow TS syntax such as non-null assertions and instantiation expressions
+                if (isExpressionWithTypeArguments(node) || isNonNullExpression(node)) {
+                    node = node.expression;
+                    continue;
+                }
+
+                // DecoratorCallExpression :
+                //   DecoratorMemberExpression Arguments
+
+                if (isCallExpression(node)) {
+                    if (!canHaveCallExpression) {
+                        errorNode = node;
+                    }
+                    if (node.questionDotToken) {
+                        // Even if we already have an error node, error at the `?.` token since it appears earlier.
+                        errorNode = node.questionDotToken;
+                    }
+                    node = node.expression;
+                    canHaveCallExpression = false;
+                    continue;
+                }
+
+                // DecoratorMemberExpression :
+                //   IdentifierReference
+                //   DecoratorMemberExpression `.` IdentifierName
+                //   DecoratorMemberExpression `.` PrivateIdentifier
+
+                if (isPropertyAccessExpression(node)) {
+                    if (node.questionDotToken) {
+                        // Even if we already have an error node, error at the `?.` token since it appears earlier.
+                        errorNode = node.questionDotToken;
+                    }
+                    node = node.expression;
+                    canHaveCallExpression = false;
+                    continue;
+                }
+
+                if (!isIdentifier(node)) {
+                    // Even if we already have an error node, error at this node since it appears earlier.
+                    errorNode = node;
+                }
+
+                break;
+            }
+
+            if (errorNode) {
+                addRelatedInfo(
+                    error(decorator.expression, Diagnostics.Expression_must_be_enclosed_in_parentheses_to_be_used_as_a_decorator),
+                    createDiagnosticForNode(errorNode, Diagnostics.Invalid_syntax_in_decorator),
+                );
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /** Check a decorator */
     function checkDecorator(node: Decorator): void {
+        checkGrammarDecorator(node);
+
         const signature = getResolvedSignature(node);
         checkDeprecatedSignature(signature, node);
         const returnType = getReturnTypeOfSignature(signature);
