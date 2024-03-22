@@ -1763,12 +1763,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         getExactOptionalProperties,
         getAllPossiblePropertiesOfTypes,
         getSuggestedSymbolForNonexistentProperty,
-        getSuggestionForNonexistentProperty,
         getSuggestedSymbolForNonexistentJSXAttribute,
         getSuggestedSymbolForNonexistentSymbol: (location, name, meaning) => getSuggestedSymbolForNonexistentSymbol(location, escapeLeadingUnderscores(name), meaning),
-        getSuggestionForNonexistentSymbol: (location, name, meaning) => getSuggestionForNonexistentSymbol(location, escapeLeadingUnderscores(name), meaning),
         getSuggestedSymbolForNonexistentModule,
-        getSuggestionForNonexistentExport,
         getSuggestedSymbolForNonexistentClassMember,
         getBaseConstraintOfType,
         getDefaultFromTypeParameter: type => type && type.flags & TypeFlags.TypeParameter ? getDefaultFromTypeParameter(type as TypeParameter) : undefined,
@@ -6311,7 +6308,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
     }
 
-    function isEntityNameVisible(entityName: EntityNameOrEntityNameExpression, enclosingDeclaration: Node): SymbolVisibilityResult {
+    function getMeaningOfEntityNameReference(entityName: EntityNameOrEntityNameExpression): SymbolFlags {
         // get symbol of the first identifier of the entityName
         let meaning: SymbolFlags;
         if (
@@ -6324,7 +6321,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
         else if (
             entityName.kind === SyntaxKind.QualifiedName || entityName.kind === SyntaxKind.PropertyAccessExpression ||
-            entityName.parent.kind === SyntaxKind.ImportEqualsDeclaration
+            entityName.parent.kind === SyntaxKind.ImportEqualsDeclaration ||
+            (entityName.parent.kind === SyntaxKind.QualifiedName && (entityName.parent as QualifiedName).left === entityName) ||
+            (entityName.parent.kind === SyntaxKind.PropertyAccessExpression && (entityName.parent as PropertyAccessExpression).expression === entityName) ||
+            (entityName.parent.kind === SyntaxKind.ElementAccessExpression && (entityName.parent as ElementAccessExpression).expression === entityName)
         ) {
             // Left identifier from type reference or TypeAlias
             // Entity name of the import declaration
@@ -6334,7 +6334,11 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             // Type Reference or TypeAlias entity = Identifier
             meaning = SymbolFlags.Type;
         }
+        return meaning;
+    }
 
+    function isEntityNameVisible(entityName: EntityNameOrEntityNameExpression, enclosingDeclaration: Node): SymbolVisibilityResult {
+        const meaning = getMeaningOfEntityNameReference(entityName);
         const firstIdentifier = getFirstIdentifier(entityName);
         const symbol = resolveName(enclosingDeclaration, firstIdentifier.escapedText, meaning, /*nameNotFoundMessage*/ undefined, /*nameArg*/ undefined, /*isUse*/ false);
         if (symbol && symbol.flags & SymbolFlags.TypeParameter && meaning & SymbolFlags.Type) {
@@ -8579,15 +8583,16 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 introducesError = true;
                 return { introducesError, node };
             }
-            const sym = resolveEntityName(leftmost, SymbolFlags.All, /*ignoreErrors*/ true, /*dontResolveAlias*/ true);
+            const meaning = getMeaningOfEntityNameReference(node);
+            const sym = resolveEntityName(leftmost, meaning, /*ignoreErrors*/ true, /*dontResolveAlias*/ true);
             if (sym) {
-                if (isSymbolAccessible(sym, context.enclosingDeclaration, SymbolFlags.All, /*shouldComputeAliasesToMakeVisible*/ false).accessibility !== SymbolAccessibility.Accessible) {
+                if (isSymbolAccessible(sym, context.enclosingDeclaration, meaning, /*shouldComputeAliasesToMakeVisible*/ false).accessibility !== SymbolAccessibility.Accessible) {
                     if (!isDeclarationName(node)) {
                         introducesError = true;
                     }
                 }
                 else {
-                    context.tracker.trackSymbol(sym, context.enclosingDeclaration, SymbolFlags.All);
+                    context.tracker.trackSymbol(sym, context.enclosingDeclaration, meaning);
                     includePrivateSymbol?.(sym);
                 }
                 if (isIdentifier(node)) {
@@ -17765,6 +17770,14 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 else if (every(typeSet, t => !!(t.flags & TypeFlags.Union && ((t as UnionType).types[0].flags & TypeFlags.Null || (t as UnionType).types[1].flags & TypeFlags.Null)))) {
                     removeFromEach(typeSet, TypeFlags.Null);
                     result = getUnionType([getIntersectionType(typeSet), nullType], UnionReduction.Literal, aliasSymbol, aliasTypeArguments);
+                }
+                else if (typeSet.length >= 4) {
+                    // When we have four or more constituents, some of which are unions, we employ a "divide and conquer" strategy
+                    // where A & B & C & D is processed as (A & B) & (C & D). Since intersections of unions often produce far smaller
+                    // unions of intersections than the full cartesian product (due to some intersections becoming `never`), this can
+                    // dramatically reduce the overall work.
+                    const middle = Math.floor(typeSet.length / 2);
+                    result = getIntersectionType([getIntersectionType(typeSet.slice(0, middle)), getIntersectionType(typeSet.slice(middle))], aliasSymbol, aliasTypeArguments);
                 }
                 else {
                     // We are attempting to construct a type of the form X & (A | B) & (C | D). Transform this into a type of
@@ -33519,18 +33532,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return result;
     }
 
-    function getSuggestionForNonexistentSymbol(location: Node | undefined, outerName: __String, meaning: SymbolFlags): string | undefined {
-        const symbolResult = getSuggestedSymbolForNonexistentSymbol(location, outerName, meaning);
-        return symbolResult && symbolName(symbolResult);
-    }
-
     function getSuggestedSymbolForNonexistentModule(name: Identifier, targetModule: Symbol): Symbol | undefined {
         return targetModule.exports && getSpellingSuggestionForName(idText(name), getExportsOfModuleAsArray(targetModule), SymbolFlags.ModuleMember);
-    }
-
-    function getSuggestionForNonexistentExport(name: Identifier, targetModule: Symbol): string | undefined {
-        const suggestion = getSuggestedSymbolForNonexistentModule(name, targetModule);
-        return suggestion && symbolName(suggestion);
     }
 
     function getSuggestionForNonexistentIndexSignature(objectType: Type, expr: ElementAccessExpression, keyedType: Type): string | undefined {
