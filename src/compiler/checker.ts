@@ -62,6 +62,7 @@ import {
     canHaveModifiers,
     canHaveModuleSpecifier,
     canHaveSymbol,
+    canIncludeBindAndCheckDiagnsotics,
     canUsePropertyAccess,
     cartesianProduct,
     CaseBlock,
@@ -966,7 +967,7 @@ import {
     ScriptKind,
     ScriptTarget,
     SetAccessorDeclaration,
-    setCommentRange,
+    setCommentRange as setCommentRangeWorker,
     setEmitFlags,
     setIdentifierTypeArguments,
     setNodeFlags,
@@ -1093,7 +1094,7 @@ import {
     VariableLikeDeclaration,
     VariableStatement,
     VarianceFlags,
-    visitEachChild,
+    visitEachChild as visitEachChildWorker,
     visitNode,
     visitNodes,
     Visitor,
@@ -1763,6 +1764,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         getImmediateAliasedSymbol,
         getAliasedSymbol: resolveAlias,
         getEmitResolver,
+        requiresAddingImplicitUndefined,
         getExportsOfModule: getExportsOfModuleAsArray,
         getExportsAndPropertiesOfModule,
         forEachExportAndPropertyOfModule,
@@ -2424,7 +2426,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
     function markAsSynthetic<T extends Node>(node: T): VisitResult<T> {
         setTextRangePosEnd(node, -1, -1);
-        return visitEachChild(node, markAsSynthetic, /*context*/ undefined);
+        return visitEachChildWorker(node, markAsSynthetic, /*context*/ undefined);
     }
 
     function getEmitResolver(sourceFile: SourceFile, cancellationToken: CancellationToken, skipDiagnostics?: boolean) {
@@ -6030,21 +6032,21 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
          * Unlike the utilities `setTextRange`, this checks if the `location` we're trying to set on `range` is within the
          * same file as the active context. If not, the range is not applied. This prevents us from copying ranges across files,
          * which will confuse the node printer (as it assumes all node ranges are within the current file).
-         * Additionally, if `range` _isn't synthetic_, and isn't in the current file, it will _copy_ it to _remove_ its' position
+         * Additionally, if `range` _isn't synthetic_, or isn't in the current file, it will _copy_ it to _remove_ its' position
          * information.
          *
          * It also calls `setOriginalNode` to setup a `.original` pointer, since you basically *always* want these in the node builder.
          */
         function setTextRange<T extends Node>(context: NodeBuilderContext, range: T, location: Node | undefined): T {
-            if (!nodeIsSynthesized(range) && !(range.flags & NodeFlags.Synthesized) && (!context.enclosingFile || context.enclosingFile !== getSourceFileOfNode(range))) {
-                range = factory.cloneNode(range);
+            if (!nodeIsSynthesized(range) || !(range.flags & NodeFlags.Synthesized) || !context.enclosingFile || context.enclosingFile !== getSourceFileOfNode(getOriginalNode(range))) {
+                range = factory.cloneNode(range); // if `range` is synthesized or originates in another file, copy it so it definitely has synthetic positions
             }
             if (range === location) return range;
             if (!location) {
                 return range;
             }
             if (!context.enclosingFile || context.enclosingFile !== getSourceFileOfNode(getOriginalNode(location))) {
-                return setOriginalNode(range, location);
+                return setOriginalNode(range, location); // if `location` is from another file, only set/update original pointer, and not positions, since copying text across files isn't supported by the emitter
             }
             return setTextRangeWorker(setOriginalNode(range, location), location);
         }
@@ -6718,7 +6720,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     if (!nodeIsSynthesized(node) && getParseTreeNode(node) === node) {
                         return node;
                     }
-                    return setTextRange(context, factory.cloneNode(visitEachChild(node, deepCloneOrReuseNode, /*context*/ undefined, deepCloneOrReuseNodes, deepCloneOrReuseNode)), node);
+                    return setTextRange(context, factory.cloneNode(visitEachChildWorker(node, deepCloneOrReuseNode, /*context*/ undefined, deepCloneOrReuseNodes, deepCloneOrReuseNode)), node);
                 }
 
                 function deepCloneOrReuseNodes(
@@ -7065,6 +7067,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     const getterSignature = getSignatureFromDeclaration(getterDeclaration);
                     typeElements.push(
                         setCommentRange(
+                            context,
                             signatureToSignatureDeclarationHelper(getterSignature, SyntaxKind.GetAccessor, context, { name: propertyName }) as GetAccessorDeclaration,
                             getterDeclaration,
                         ),
@@ -7073,6 +7076,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     const setterSignature = getSignatureFromDeclaration(setterDeclaration);
                     typeElements.push(
                         setCommentRange(
+                            context,
                             signatureToSignatureDeclarationHelper(setterSignature, SyntaxKind.SetAccessor, context, { name: propertyName }) as SetAccessorDeclaration,
                             setterDeclaration,
                         ),
@@ -7130,10 +7134,18 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 }
                 else if (propertySymbol.valueDeclaration) {
                     // Copy comments to node for declaration emit
-                    setCommentRange(node, propertySymbol.valueDeclaration);
+                    setCommentRange(context, node, propertySymbol.valueDeclaration);
                 }
                 return node;
             }
+        }
+
+        function setCommentRange<T extends Node>(context: NodeBuilderContext, node: T, range: Node): T {
+            if (context.enclosingFile && context.enclosingFile === getSourceFileOfNode(range)) {
+                // Copy comments to node for declaration emit
+                return setCommentRangeWorker(node, range);
+            }
+            return node;
         }
 
         function mapToTypeNodes(types: readonly Type[] | undefined, context: NodeBuilderContext, isBareList?: boolean): TypeNode[] | undefined {
@@ -7577,7 +7589,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     if (context.tracker.canTrackSymbol && isComputedPropertyName(node) && isLateBindableName(node)) {
                         trackComputedName(node.expression, context.enclosingDeclaration, context);
                     }
-                    let visited = visitEachChild(node, elideInitializerAndSetEmitFlags, /*context*/ undefined, /*nodesVisitor*/ undefined, elideInitializerAndSetEmitFlags);
+                    let visited = visitEachChildWorker(node, elideInitializerAndSetEmitFlags, /*context*/ undefined, /*nodesVisitor*/ undefined, elideInitializerAndSetEmitFlags);
                     if (isBindingElement(visited)) {
                         visited = factory.updateBindingElement(
                             visited,
@@ -7990,6 +8002,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             if (!(result.kind & SyntaxKind.Identifier)) {
                 return factory.createIdentifier("(Missing type parameter)");
             }
+            const decl = type.symbol?.declarations?.[0];
+            if (decl && isTypeParameterDeclaration(decl)) {
+                result = setTextRange(context, result, decl.name);
+            }
             if (context.flags & NodeBuilderFlags.GenerateNamesForShadowedTypeParams) {
                 const rawtext = result.escapedText as string;
                 let i = context.typeParameterNamesByTextNextNameCount?.get(rawtext) || 0;
@@ -8391,7 +8407,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     name.symbol = sym!; // for quickinfo, which uses identifier symbol information
                     return setTextRange(context, setEmitFlags(name, EmitFlags.NoAsciiEscaping), node);
                 }
-                const updated = visitEachChild(node, c => attachSymbolToLeftmostIdentifier(c), /*context*/ undefined);
+                const updated = visitEachChildWorker(node, c => attachSymbolToLeftmostIdentifier(c), /*context*/ undefined);
                 if (updated !== node) {
                     setTextRange(context, updated, node);
                 }
@@ -8502,14 +8518,15 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 //  is set to build for (even though we are reusing the node structure, the position information
                 //  would make the printer print invalid spans for literals and identifiers, and the formatter would
                 //  choke on the mismatched positonal spans between a parent and an injected child from another file).
-                return result === node ? setTextRange(context, factory.cloneNode(result), node) : result;
+                return result ? setTextRange(context, result, node) : undefined;
             }
 
             function createRecoveryBoundary() {
+                let trackedSymbols: TrackedSymbol[];
                 let unreportedErrors: (() => void)[];
                 const oldTracker = context.tracker;
                 const oldTrackedSymbols = context.trackedSymbols;
-                context.trackedSymbols = [];
+                context.trackedSymbols = undefined;
                 const oldEncounteredError = context.encounteredError;
                 context.tracker = new SymbolTrackerImpl(context, {
                     ...oldTracker.inner,
@@ -8529,11 +8546,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                         markError(() => oldTracker.reportNonSerializableProperty(name));
                     },
                     trackSymbol(sym, decl, meaning) {
-                        const accessibility = isSymbolAccessible(sym, decl, meaning, /*shouldComputeAliasesToMakeVisible*/ false);
-                        if (accessibility.accessibility !== SymbolAccessibility.Accessible) {
-                            (context.trackedSymbols ??= []).push([sym, decl, meaning]);
-                            return true;
-                        }
+                        (trackedSymbols ??= []).push([sym, decl, meaning]);
                         return false;
                     },
                     moduleResolverHost: context.tracker.moduleResolverHost,
@@ -8550,13 +8563,13 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 }
 
                 function startRecoveryScope() {
-                    const initialTrackedSymbolsTop = context.trackedSymbols?.length ?? 0;
+                    const trackedSymbolsTop = trackedSymbols?.length ?? 0;
                     const unreportedErrorsTop = unreportedErrors?.length ?? 0;
                     return () => {
                         hadError = false;
                         // Reset the tracked symbols to before the error
-                        if (context.trackedSymbols) {
-                            context.trackedSymbols.length = initialTrackedSymbolsTop;
+                        if (trackedSymbols) {
+                            trackedSymbols.length = trackedSymbolsTop;
                         }
                         if (unreportedErrors) {
                             unreportedErrors.length = unreportedErrorsTop;
@@ -8566,7 +8579,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
                 function finalizeBoundary() {
                     context.tracker = oldTracker;
-                    const newTrackedSymbols = context.trackedSymbols;
                     context.trackedSymbols = oldTrackedSymbols;
                     context.encounteredError = oldEncounteredError;
 
@@ -8574,7 +8586,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     if (hadError) {
                         return false;
                     }
-                    newTrackedSymbols?.forEach(
+                    trackedSymbols?.forEach(
                         ([symbol, enclosingDeclaration, meaning]) =>
                             context.tracker.trackSymbol(
                                 symbol,
@@ -8587,6 +8599,79 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             }
             function onEnterNewScope(node: IntroducesNewScopeNode | ConditionalTypeNode) {
                 return enterNewScope(context, node, getParametersInScope(node), getTypeParametersInScope(node));
+            }
+
+            function tryVisitSimpleTypeNode(node: TypeNode): TypeNode | undefined {
+                const innerNode = skipTypeParentheses(node);
+                switch (innerNode.kind) {
+                    case SyntaxKind.TypeReference:
+                        return tryVisitTypeReference(innerNode as TypeReferenceNode);
+                    case SyntaxKind.TypeQuery:
+                        return tryVisitTypeQuery(innerNode as TypeQueryNode);
+                    case SyntaxKind.IndexedAccessType:
+                        return tryVisitIndexedAccess(innerNode as IndexedAccessTypeNode);
+                    case SyntaxKind.TypeOperator:
+                        const typeOperatorNode = innerNode as TypeOperatorNode;
+                        if (typeOperatorNode.operator === SyntaxKind.KeyOfKeyword) {
+                            return tryVisitKeyOf(typeOperatorNode);
+                        }
+                }
+                return visitNode(node, visitExistingNodeTreeSymbols, isTypeNode);
+            }
+
+            function tryVisitIndexedAccess(node: IndexedAccessTypeNode): TypeNode | undefined {
+                const resultObjectType = tryVisitSimpleTypeNode(node.objectType);
+                if (resultObjectType === undefined) {
+                    return undefined;
+                }
+                return factory.updateIndexedAccessTypeNode(node, resultObjectType, visitNode(node.indexType, visitExistingNodeTreeSymbols, isTypeNode)!);
+            }
+
+            function tryVisitKeyOf(node: TypeOperatorNode): TypeNode | undefined {
+                Debug.assertEqual(node.operator, SyntaxKind.KeyOfKeyword);
+                const type = tryVisitSimpleTypeNode(node.type);
+                if (type === undefined) {
+                    return undefined;
+                }
+                return factory.updateTypeOperatorNode(node, type);
+            }
+
+            function tryVisitTypeQuery(node: TypeQueryNode): TypeNode | undefined {
+                const { introducesError, node: exprName } = trackExistingEntityName(node.exprName, context);
+                if (!introducesError) {
+                    return factory.updateTypeQueryNode(
+                        node,
+                        exprName,
+                        visitNodes(node.typeArguments, visitExistingNodeTreeSymbols, isTypeNode),
+                    );
+                }
+
+                const serializedName = serializeTypeName(context, node.exprName, /*isTypeOf*/ true);
+                if (serializedName) {
+                    return setTextRange(context, serializedName, node.exprName);
+                }
+            }
+
+            function tryVisitTypeReference(node: TypeReferenceNode): TypeNode | undefined {
+                if (canReuseTypeNode(context, node)) {
+                    const { introducesError, node: newName } = trackExistingEntityName(node.typeName, context);
+                    const typeArguments = visitNodes(node.typeArguments, visitExistingNodeTreeSymbols, isTypeNode);
+
+                    if (!introducesError) {
+                        const updated = factory.updateTypeReferenceNode(
+                            node,
+                            newName,
+                            typeArguments,
+                        );
+                        return setTextRange(context, updated, node);
+                    }
+                    else {
+                        const serializedName = serializeTypeName(context, node.typeName, /*isTypeOf*/ false, typeArguments);
+                        if (serializedName) {
+                            return setTextRange(context, serializedName, node.typeName);
+                        }
+                    }
+                }
             }
 
             function visitExistingNodeTreeSymbolsWorker(node: Node): Node | undefined {
@@ -8681,7 +8766,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     if (canReuseTypeNode(context, node)) {
                         return node;
                     }
-                    return serializeExistingTypeNode(context, node);
+                    hadError = true;
+                    return node;
                 }
                 if (isTypeParameterDeclaration(node)) {
                     return factory.updateTypeParameterDeclaration(
@@ -8692,27 +8778,23 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                         visitNode(node.default, visitExistingNodeTreeSymbols, isTypeNode),
                     );
                 }
-                if (isTypeReferenceNode(node)) {
-                    if (canReuseTypeNode(context, node)) {
-                        const { introducesError, node: newName } = trackExistingEntityName(node.typeName, context);
-                        const typeArguments = visitNodes(node.typeArguments, visitExistingNodeTreeSymbols, isTypeNode);
 
-                        if (!introducesError) {
-                            const updated = factory.updateTypeReferenceNode(
-                                node,
-                                newName,
-                                typeArguments,
-                            );
-                            return setTextRange(context, updated, node);
-                        }
-                        else {
-                            const serializedName = serializeTypeName(context, node.typeName, /*isTypeOf*/ false, typeArguments);
-                            if (serializedName) {
-                                return setTextRange(context, serializedName, node.typeName);
-                            }
-                        }
+                if (isIndexedAccessTypeNode(node)) {
+                    const result = tryVisitIndexedAccess(node);
+                    if (!result) {
+                        hadError = true;
+                        return node;
                     }
-                    return serializeExistingTypeNode(context, node);
+                    return result;
+                }
+
+                if (isTypeReferenceNode(node)) {
+                    const result = tryVisitTypeReference(node);
+                    if (result) {
+                        return result;
+                    }
+                    hadError = true;
+                    return node;
                 }
                 if (isLiteralImportTypeNode(node)) {
                     const nodeSymbol = getNodeLinks(node).resolvedSymbol;
@@ -8748,7 +8830,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     || (isPropertySignature(node) && !node.type && !node.initializer)
                     || (isParameter(node) && !node.type && !node.initializer)
                 ) {
-                    let visited = visitEachChild(node, visitExistingNodeTreeSymbols, /*context*/ undefined);
+                    let visited = visitEachChild(node, visitExistingNodeTreeSymbols);
                     if (visited === node) {
                         visited = setTextRange(context, factory.cloneNode(node), node);
                     }
@@ -8759,19 +8841,12 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     return visited;
                 }
                 if (isTypeQueryNode(node)) {
-                    const { introducesError, node: exprName } = trackExistingEntityName(node.exprName, context);
-                    if (introducesError) {
-                        const serializedName = serializeTypeName(context, node.exprName, /*isTypeOf*/ true);
-                        if (serializedName) {
-                            return setTextRange(context, serializedName, node.exprName);
-                        }
-                        return serializeExistingTypeNode(context, node);
+                    const result = tryVisitTypeQuery(node);
+                    if (!result) {
+                        hadError = true;
+                        return node;
                     }
-                    return factory.updateTypeQueryNode(
-                        node,
-                        exprName,
-                        visitNodes(node.typeArguments, visitExistingNodeTreeSymbols, isTypeNode),
-                    );
+                    return result;
                 }
                 if (isComputedPropertyName(node) && isEntityNameExpression(node.expression)) {
                     const { node: result, introducesError } = trackExistingEntityName(node.expression, context);
@@ -8809,7 +8884,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 }
 
                 if (isTupleTypeNode(node) || isTypeLiteralNode(node) || isMappedTypeNode(node)) {
-                    const visited = visitEachChild(node, visitExistingNodeTreeSymbols, /*context*/ undefined);
+                    const visited = visitEachChild(node, visitExistingNodeTreeSymbols);
                     const clone = setTextRange(context, visited === node ? factory.cloneNode(node) : visited, node);
                     const flags = getEmitFlags(clone);
                     setEmitFlags(clone, flags | (context.flags & NodeBuilderFlags.MultilineObjectLiterals && isTypeLiteralNode(node) ? 0 : EmitFlags.SingleLine));
@@ -8837,13 +8912,50 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     );
                 }
 
-                if (isTypeOperatorNode(node) && node.operator === SyntaxKind.UniqueKeyword && node.type.kind === SyntaxKind.SymbolKeyword) {
-                    if (!canReuseTypeNode(context, node)) {
-                        return serializeExistingTypeNode(context, node);
+                if (isTypeOperatorNode(node)) {
+                    if (node.operator === SyntaxKind.UniqueKeyword && node.type.kind === SyntaxKind.SymbolKeyword) {
+                        if (!canReuseTypeNode(context, node)) {
+                            hadError = true;
+                            return node;
+                        }
+                    }
+                    else if (node.operator === SyntaxKind.KeyOfKeyword) {
+                        const result = tryVisitKeyOf(node);
+                        if (!result) {
+                            hadError = true;
+                            return node;
+                        }
+                        return result;
                     }
                 }
 
-                return visitEachChild(node, visitExistingNodeTreeSymbols, /*context*/ undefined);
+                return visitEachChild(node, visitExistingNodeTreeSymbols);
+
+                function visitEachChild<T extends Node>(node: T, visitor: Visitor): T;
+                function visitEachChild<T extends Node>(node: T | undefined, visitor: Visitor): T | undefined;
+                function visitEachChild<T extends Node>(node: T | undefined, visitor: Visitor): T | undefined {
+                    const nonlocalNode = !context.enclosingFile || context.enclosingFile !== getSourceFileOfNode(node);
+                    return visitEachChildWorker(node, visitor, /*context*/ undefined, nonlocalNode ? visitNodesWithoutCopyingPositions : undefined);
+                }
+
+                function visitNodesWithoutCopyingPositions(
+                    nodes: NodeArray<Node> | undefined,
+                    visitor: Visitor,
+                    test?: (node: Node) => boolean,
+                    start?: number,
+                    count?: number,
+                ): NodeArray<Node> | undefined {
+                    let result = visitNodes(nodes, visitor, test, start, count);
+                    if (result) {
+                        if (result.pos !== -1 || result.end !== -1) {
+                            if (result === nodes) {
+                                result = factory.createNodeArray(nodes, nodes.hasTrailingComma);
+                            }
+                            setTextRangePosEnd(result, -1, -1);
+                        }
+                    }
+                    return result;
+                }
 
                 function getEffectiveDotDotDotForParameter(p: ParameterDeclaration) {
                     return p.dotDotDotToken || (p.type && isJSDocVariadicType(p.type) ? factory.createToken(SyntaxKind.DotDotDotToken) : undefined);
@@ -14681,7 +14793,11 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function getApparentTypeOfIntersectionType(type: IntersectionType, thisArgument: Type) {
-        return type.resolvedApparentType || (type.resolvedApparentType = getTypeWithThisArgument(type, thisArgument, /*needApparentType*/ true));
+        if (type === thisArgument) {
+            return type.resolvedApparentType || (type.resolvedApparentType = getTypeWithThisArgument(type, thisArgument, /*needApparentType*/ true));
+        }
+        const key = `I${getTypeId(type)},${getTypeId(thisArgument)}`;
+        return getCachedType(key) ?? setCachedType(key, getTypeWithThisArgument(type, thisArgument, /*needApparentType*/ true));
     }
 
     function getResolvedTypeParameterDefault(typeParameter: TypeParameter): Type | undefined {
@@ -29479,6 +29595,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function getNarrowableTypeForReference(type: Type, reference: Node, checkMode?: CheckMode) {
+        if (isNoInferType(type)) {
+            type = (type as SubstitutionType).baseType;
+        }
         // When the type of a reference is or contains an instantiable type with a union type constraint, and
         // when the reference is in a constraint position (where it is known we'll obtain the apparent type) or
         // has a contextual type containing no top-level instantiables (meaning constraints will determine
@@ -49029,7 +49148,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function calculateNodeCheckFlagWorker(node: Node, flag: LazyNodeCheckFlags) {
-        if (!compilerOptions.noCheck) {
+        if (!compilerOptions.noCheck && canIncludeBindAndCheckDiagnsotics(getSourceFileOfNode(node), compilerOptions)) {
             // Unless noCheck is passed, assume calculation of node check flags has been done eagerly.
             // This saves needing to mark up where in the eager traversal certain results are "done",
             // just to reconcile the eager and lazy results. This wouldn't be hard if an eager typecheck
@@ -50898,7 +51017,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                         return true;
                     }
                 }
-                return false;
             }
         }
 
