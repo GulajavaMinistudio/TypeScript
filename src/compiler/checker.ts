@@ -17835,10 +17835,16 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
     // Check that the given type has a match in every union. A given type is matched by
     // an identical type, and a literal type is additionally matched by its corresponding
-    // primitive type.
+    // primitive type, and missingType is matched by undefinedType (and vice versa).
     function eachUnionContains(unionTypes: UnionType[], type: Type) {
         for (const u of unionTypes) {
             if (!containsType(u.types, type)) {
+                if (type === missingType) {
+                    return containsType(u.types, undefinedType);
+                }
+                if (type === undefinedType) {
+                    return containsType(u.types, missingType);
+                }
                 const primitive = type.flags & TypeFlags.StringLiteral ? stringType :
                     type.flags & (TypeFlags.Enum | TypeFlags.NumberLiteral) ? numberType :
                     type.flags & TypeFlags.BigIntLiteral ? bigintType :
@@ -17918,6 +17924,14 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             for (const t of u.types) {
                 if (insertType(checked, t)) {
                     if (eachUnionContains(unionTypes, t)) {
+                        // undefinedType/missingType should always come sorted first so we leverage that here
+                        if (t === undefinedType && result.length && result[0] === missingType) {
+                            continue;
+                        }
+                        if (t === missingType && result.length && result[0] === undefinedType) {
+                            result[0] = missingType;
+                            continue;
+                        }
                         insertType(result, t);
                     }
                 }
@@ -51097,6 +51111,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                                 // fallthrough
                             case ModuleKind.ES2022:
                             case ModuleKind.ESNext:
+                            case ModuleKind.Preserve:
                             case ModuleKind.System:
                                 if (languageVersion >= ScriptTarget.ES2017) {
                                     break;
@@ -51914,13 +51929,13 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
 
         const nodeArguments = node.arguments;
-        if (moduleKind !== ModuleKind.ESNext && moduleKind !== ModuleKind.NodeNext && moduleKind !== ModuleKind.Node16) {
+        if (moduleKind !== ModuleKind.ESNext && moduleKind !== ModuleKind.NodeNext && moduleKind !== ModuleKind.Node16 && moduleKind !== ModuleKind.Preserve) {
             // We are allowed trailing comma after proposal-import-assertions.
             checkGrammarForDisallowedTrailingComma(nodeArguments);
 
             if (nodeArguments.length > 1) {
                 const importAttributesArgument = nodeArguments[1];
-                return grammarErrorOnNode(importAttributesArgument, Diagnostics.Dynamic_imports_only_support_a_second_argument_when_the_module_option_is_set_to_esnext_node16_or_nodenext);
+                return grammarErrorOnNode(importAttributesArgument, Diagnostics.Dynamic_imports_only_support_a_second_argument_when_the_module_option_is_set_to_esnext_node16_nodenext_or_preserve);
             }
         }
 
@@ -52130,8 +52145,7 @@ export function signatureHasRestParameter(s: Signature) {
     return !!(s.flags & SignatureFlags.HasRestParameter);
 }
 
-/** @internal */
-export function signatureHasLiteralTypes(s: Signature) {
+function signatureHasLiteralTypes(s: Signature) {
     return !!(s.flags & SignatureFlags.HasLiteralTypes);
 }
 
