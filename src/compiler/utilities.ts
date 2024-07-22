@@ -287,6 +287,7 @@ import {
     isIdentifier,
     isIdentifierStart,
     isIdentifierText,
+    isImportDeclaration,
     isImportTypeNode,
     isInterfaceDeclaration,
     isJSDoc,
@@ -2206,6 +2207,7 @@ export function tryGetTextOfPropertyName(name: PropertyName | NoSubstitutionTemp
             return name.emitNode?.autoGenerate ? undefined : name.escapedText;
         case SyntaxKind.StringLiteral:
         case SyntaxKind.NumericLiteral:
+        case SyntaxKind.BigIntLiteral:
         case SyntaxKind.NoSubstitutionTemplateLiteral:
             return escapeLeadingUnderscores(name.text);
         case SyntaxKind.ComputedPropertyName:
@@ -5220,6 +5222,7 @@ export function getPropertyNameForPropertyNameNode(name: PropertyName | JsxAttri
         case SyntaxKind.StringLiteral:
         case SyntaxKind.NoSubstitutionTemplateLiteral:
         case SyntaxKind.NumericLiteral:
+        case SyntaxKind.BigIntLiteral:
             return escapeLeadingUnderscores(name.text);
         case SyntaxKind.ComputedPropertyName:
             const nameExpression = name.expression;
@@ -9006,6 +9009,12 @@ export const computedOptions = createComputedCompilerOptions({
             return getStrictOptionValue(compilerOptions, "strictPropertyInitialization");
         },
     },
+    strictBuiltinIteratorReturn: {
+        dependencies: ["strict"],
+        computeValue: compilerOptions => {
+            return getStrictOptionValue(compilerOptions, "strictBuiltinIteratorReturn");
+        },
+    },
     alwaysStrict: {
         dependencies: ["strict"],
         computeValue: compilerOptions => {
@@ -9093,6 +9102,7 @@ export type StrictOptionName =
     | "strictFunctionTypes"
     | "strictBindCallApply"
     | "strictPropertyInitialization"
+    | "strictBuiltinIteratorReturn"
     | "alwaysStrict"
     | "useUnknownInCatchVariables";
 
@@ -11750,4 +11760,10 @@ export function hasInferredType(node: Node): node is HasInferredType {
             assertType<never>(node);
             return false;
     }
+}
+
+/** @internal */
+export function isSideEffectImport(node: Node): boolean {
+    const ancestor = findAncestor(node, isImportDeclaration);
+    return !!ancestor && !ancestor.importClause;
 }
