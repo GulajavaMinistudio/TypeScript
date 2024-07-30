@@ -1653,6 +1653,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         getNonOptionalType: removeOptionalTypeMarker,
         getTypeArguments,
         typeToTypeNode: nodeBuilder.typeToTypeNode,
+        typePredicateToTypePredicateNode: nodeBuilder.typePredicateToTypePredicateNode,
         indexInfoToIndexSignatureDeclaration: nodeBuilder.indexInfoToIndexSignatureDeclaration,
         signatureToSignatureDeclaration: nodeBuilder.signatureToSignatureDeclaration,
         symbolToEntityName: nodeBuilder.symbolToEntityName,
@@ -27381,6 +27382,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function isFunctionObjectType(type: ObjectType): boolean {
+        if (getObjectFlags(type) & ObjectFlags.EvolvingArray) {
+            return false;
+        }
         // We do a quick check for a "bind" property before performing the more expensive subtype
         // check. This gives us a quicker out in the common case where an object type is not a function.
         const resolved = resolveStructuredTypeMembers(type);
@@ -41902,7 +41906,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function checkFunctionOrConstructorSymbolWorker(symbol: Symbol): void {
-        function getCanonicalOverload(overloads: Declaration[], implementation: FunctionLikeDeclaration | undefined): Declaration {
+        function getCanonicalOverload(overloads: readonly Declaration[], implementation: FunctionLikeDeclaration | undefined): Declaration {
             // Consider the canonical set of flags to be the flags of the bodyDeclaration or the first declaration
             // Error on all deviations from this canonical set of flags
             // The caveat is that if some overloads are defined in lib.d.ts, we don't want to
@@ -41918,19 +41922,35 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             const someButNotAllOverloadFlags = someOverloadFlags ^ allOverloadFlags;
             if (someButNotAllOverloadFlags !== 0) {
                 const canonicalFlags = getEffectiveDeclarationFlags(getCanonicalOverload(overloads, implementation), flagsToCheck);
-                forEach(overloads, o => {
-                    const deviation = getEffectiveDeclarationFlags(o, flagsToCheck) ^ canonicalFlags;
-                    if (deviation & ModifierFlags.Export) {
-                        error(getNameOfDeclaration(o), Diagnostics.Overload_signatures_must_all_be_exported_or_non_exported);
-                    }
-                    else if (deviation & ModifierFlags.Ambient) {
-                        error(getNameOfDeclaration(o), Diagnostics.Overload_signatures_must_all_be_ambient_or_non_ambient);
-                    }
-                    else if (deviation & (ModifierFlags.Private | ModifierFlags.Protected)) {
-                        error(getNameOfDeclaration(o) || o, Diagnostics.Overload_signatures_must_all_be_public_private_or_protected);
-                    }
-                    else if (deviation & ModifierFlags.Abstract) {
-                        error(getNameOfDeclaration(o), Diagnostics.Overload_signatures_must_all_be_abstract_or_non_abstract);
+                group(overloads, o => getSourceFileOfNode(o).fileName).forEach(overloadsInFile => {
+                    const canonicalFlagsForFile = getEffectiveDeclarationFlags(getCanonicalOverload(overloadsInFile, implementation), flagsToCheck);
+                    for (const o of overloadsInFile) {
+                        const deviation = getEffectiveDeclarationFlags(o, flagsToCheck) ^ canonicalFlags;
+                        const deviationInFile = getEffectiveDeclarationFlags(o, flagsToCheck) ^ canonicalFlagsForFile;
+                        if (deviationInFile & ModifierFlags.Export) {
+                            // Overloads in different files need not all have export modifiers. This is ok:
+                            //   // lib.d.ts
+                            //   declare function foo(s: number): string;
+                            //   declare function foo(s: string): number;
+                            //   export { foo };
+                            //
+                            //   // app.ts
+                            //   declare module "lib" {
+                            //     export function foo(s: boolean): boolean;
+                            //   }
+                            error(getNameOfDeclaration(o), Diagnostics.Overload_signatures_must_all_be_exported_or_non_exported);
+                        }
+                        else if (deviationInFile & ModifierFlags.Ambient) {
+                            // Though rare, a module augmentation (necessarily ambient) is allowed to add overloads
+                            // to a non-ambient function in an implementation file.
+                            error(getNameOfDeclaration(o), Diagnostics.Overload_signatures_must_all_be_ambient_or_non_ambient);
+                        }
+                        else if (deviation & (ModifierFlags.Private | ModifierFlags.Protected)) {
+                            error(getNameOfDeclaration(o) || o, Diagnostics.Overload_signatures_must_all_be_public_private_or_protected);
+                        }
+                        else if (deviation & ModifierFlags.Abstract) {
+                            error(getNameOfDeclaration(o), Diagnostics.Overload_signatures_must_all_be_abstract_or_non_abstract);
+                        }
                     }
                 });
             }
@@ -43532,7 +43552,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     // entire parameter does not have type annotation, suggest adding an annotation
                     addRelatedInfo(
                         diagnostic,
-                        createFileDiagnostic(getSourceFileOfNode(wrappingDeclaration), wrappingDeclaration.end, 1, Diagnostics.We_can_only_write_a_type_for_0_by_adding_a_type_for_the_entire_parameter_here, declarationNameToString(node.propertyName)),
+                        createFileDiagnostic(getSourceFileOfNode(wrappingDeclaration), wrappingDeclaration.end, 0, Diagnostics.We_can_only_write_a_type_for_0_by_adding_a_type_for_the_entire_parameter_here, declarationNameToString(node.propertyName)),
                     );
                 }
                 diagnostics.add(diagnostic);
