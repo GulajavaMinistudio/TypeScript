@@ -7,7 +7,7 @@ import {
 } from "./tsc.js";
 import { TestServerHost } from "./virtualFileSystemWithWatch.js";
 
-export function forEachTscScenarioWithNoCheck(buildType: "-b" | "-p") {
+export function forEachTscScenarioWithNoCheck(buildType: "-b" | "-p"): void {
     const commandLineArgs = buildType === "-b" ?
         ["-b", "-v"] :
         emptyArray;
@@ -53,7 +53,7 @@ export function forEachTscScenarioWithNoCheck(buildType: "-b" | "-p") {
                                     ...options,
                                 },
                             }),
-                        }, { currentDirectory: "/home/src/workspaces/project" }),
+                        }),
                     commandLineArgs: [...commandLineArgs, "--noCheck"],
                     edits: [
                         noChangeRun, // Should be no op

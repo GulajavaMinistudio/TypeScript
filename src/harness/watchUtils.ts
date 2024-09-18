@@ -1,6 +1,6 @@
 import {
     arrayFrom,
-    canWatchDirectoryOrFile,
+    canWatchDirectoryOrFilePath,
     compareStringsCaseSensitive,
     contains,
     createMultiMap,
@@ -8,16 +8,15 @@ import {
     FileWatcher,
     FileWatcherCallback,
     GetCanonicalFileName,
-    getPathComponents,
     MultiMap,
     Path,
     PollingInterval,
     System,
 } from "./_namespaces/ts.js";
 
-export function ensureWatchablePath(path: string, locationType: string) {
+export function ensureWatchablePath(path: string, locationType: string): void {
     Debug.assert(
-        canWatchDirectoryOrFile(getPathComponents(path as Path)),
+        canWatchDirectoryOrFilePath(path as Path),
         `Not a watchable location: ${locationType} like "/home/src/workspaces/project" or refer canWatchDirectoryOrFile for more allowed locations`,
     );
 }
@@ -196,7 +195,7 @@ export function createWatchUtils<PollingWatcherData, FsWatcherData>(
     }
 }
 
-export function serializeMultiMap<T>(baseline: string[], caption: string, multiMap: MultiMap<string, T>, serialized: Map<string, T[]> | undefined) {
+export function serializeMultiMap<T>(baseline: string[], caption: string, multiMap: MultiMap<string, T>, serialized: Map<string, T[]> | undefined): Map<string, T[]> | undefined {
     let hasChange = diffMap(baseline, caption, multiMap, serialized, /*deleted*/ false);
     hasChange = diffMap(baseline, caption, serialized, multiMap, /*deleted*/ true) || hasChange;
     if (hasChange) {

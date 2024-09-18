@@ -1,6 +1,7 @@
 import * as ts from "../../_namespaces/ts.js";
 import { dedent } from "../../_namespaces/Utils.js";
 import { jsonToReadableText } from "../helpers.js";
+import { fakeTsVersion } from "../helpers/baseline.js";
 import { compilerOptionsToConfigJson } from "../helpers/contents.js";
 import {
     noChangeOnlyRuns,
@@ -29,7 +30,7 @@ describe("unittests:: tsc:: incremental::", () => {
                         "src/**/*.ts",
                     ],
                 }),
-            }, { currentDirectory: "/home/src/workspaces/project" }),
+            }),
         commandLineArgs: ["--incremental", "--tsBuildInfoFile", ".tsbuildinfo", "--explainFiles"],
         edits: noChangeOnlyRuns,
     });
@@ -46,7 +47,7 @@ describe("unittests:: tsc:: incremental::", () => {
                         outDir: "dist",
                     },
                 }),
-            }, { currentDirectory: "/home/src/workspaces/project" }),
+            }),
         commandLineArgs: ["--rootDir", "src"],
         edits: noChangeOnlyRuns,
     });
@@ -59,7 +60,7 @@ describe("unittests:: tsc:: incremental::", () => {
                 "/home/src/workspaces/project/src/main.d.ts": "export const x = 10;",
                 "/home/src/workspaces/project/src/another.d.ts": "export const y = 10;",
                 "/home/src/workspaces/project/tsconfig.json": "{}",
-            }, { currentDirectory: "/home/src/workspaces/project" }),
+            }),
         commandLineArgs: ["--incremental"],
         edits: [
             noChangeRun,
@@ -83,7 +84,7 @@ describe("unittests:: tsc:: incremental::", () => {
                         rootDir: "./",
                     },
                 }),
-            }, { currentDirectory: "/home/src/workspaces/project" }),
+            }),
         commandLineArgs: ts.emptyArray,
         edits: noChangeOnlyRuns,
     });
@@ -96,11 +97,14 @@ describe("unittests:: tsc:: incremental::", () => {
                 "/home/src/workspaces/project/main.ts": "export const x = 10;",
                 "/home/src/workspaces/project/tsconfig.json": "{}",
                 "/home/src/workspaces/project/tsconfig.tsbuildinfo": "Some random string",
-            }, { currentDirectory: "/home/src/workspaces/project" }),
+            }),
         commandLineArgs: ["-i"],
         edits: [{
             caption: "tsbuildinfo written has error",
-            edit: sys => sys.prependFile("/home/src/workspaces/project/tsconfig.tsbuildinfo", "Some random string"),
+            edit: sys => {
+                sys.prependFile("/home/src/workspaces/project/tsconfig.tsbuildinfo", "Some random string");
+                sys.replaceFileText("/home/src/workspaces/project/tsconfig.tsbuildinfo", `"version":"${ts.version}"`, `"version":"${fakeTsVersion}"`); // build info won't parse, need to manually sterilize for baseline
+            },
         }],
     });
 
@@ -124,7 +128,7 @@ describe("unittests:: tsc:: incremental::", () => {
                     compilerOptions: { composite: true },
                     include: ["src/**/*.ts"],
                 }),
-            }, { currentDirectory: "/home/src/workspaces/project" }),
+            }),
         commandLineArgs: ts.emptyArray,
         edits: [
             noChangeRun,
@@ -185,7 +189,7 @@ declare global {
                     "/home/src/workspaces/project/node_modules/@types/react/index.d.ts": getJsxLibraryContent(), // doesn't contain a jsx-runtime definition
                     "/home/src/workspaces/project/src/index.tsx": `export const App = () => <div propA={true}></div>;`,
                     "/home/src/workspaces/project/tsconfig.json": jsonToReadableText({ compilerOptions: { module: "commonjs", jsx: "react-jsx", incremental: true, jsxImportSource: "react" } }),
-                }, { currentDirectory: "/home/src/workspaces/project" }),
+                }),
             commandLineArgs: ts.emptyArray,
         });
 
@@ -198,7 +202,7 @@ declare global {
                     "/home/src/workspaces/project/node_modules/@types/react/index.d.ts": getJsxLibraryContent(), // doesn't contain a jsx-runtime definition
                     "/home/src/workspaces/project/src/index.tsx": `export const App = () => <div propA={true}></div>;`,
                     "/home/src/workspaces/project/tsconfig.json": jsonToReadableText({ compilerOptions: { module: "commonjs", jsx: "react-jsx", incremental: true, jsxImportSource: "react" } }),
-                }, { currentDirectory: "/home/src/workspaces/project" }),
+                }),
             commandLineArgs: ["--strict"],
         });
     });
@@ -289,7 +293,7 @@ declare global {
                         <div />
                     </Component>)`,
                 [libFile.path]: `${libFile.content}\ninterface ReadonlyArray<T> { readonly length: number }`,
-            }, { currentDirectory: "/home/src/workspaces/project" }),
+            }),
         edits: noChangeOnlyRuns,
     });
 
@@ -317,7 +321,7 @@ declare global {
                         outDir: "dist",
                     },
                 }),
-            }, { currentDirectory: "/home/src/workspaces/project" }),
+            }),
         commandLineArgs: ["--rootDir", "src"],
     });
 
@@ -332,7 +336,7 @@ declare global {
 console.log(a);`,
                 "/home/src/workspaces/project/constants.ts": "export default 1;",
                 "/home/src/workspaces/project/types.d.ts": `type MagicNumber = typeof import('./constants').default`,
-            }, { currentDirectory: "/home/src/workspaces/project" }),
+            }),
         edits: [{
             caption: "Modify imports used in global file",
             edit: sys => sys.writeFile("/home/src/workspaces/project/constants.ts", "export default 2;"),
@@ -351,7 +355,7 @@ console.log(a);`,
                 "/home/src/workspaces/project/constants.ts": "export default 1;",
                 "/home/src/workspaces/project/reexport.ts": `export { default as ConstantNumber } from "./constants"`,
                 "/home/src/workspaces/project/types.d.ts": `type MagicNumber = typeof import('./reexport').ConstantNumber`,
-            }, { currentDirectory: "/home/src/workspaces/project" }),
+            }),
         edits: [{
             caption: "Modify imports used in global file",
             edit: sys => sys.writeFile("/home/src/workspaces/project/constants.ts", "export default 2;"),
@@ -380,7 +384,7 @@ console.log(a);`,
                         const wrapper = () => Messageable();
                         type MessageablePerson = InstanceType<ReturnType<typeof wrapper>>;
                         export default MessageablePerson;`,
-                }, { currentDirectory: "/home/src/workspaces/project" }),
+                }),
             modifySystem: sys =>
                 sys.appendFile(
                     libFile.path,
@@ -448,7 +452,7 @@ console.log(a);`,
                 "/home/src/workspaces/project/b.ts": `export const b = 10;const bLocal = 10;`,
                 "/home/src/workspaces/project/c.ts": `import { a } from "./a";export const c = a;`,
                 "/home/src/workspaces/project/d.ts": `import { b } from "./b";export const d = b;`,
-            }, { currentDirectory: "/home/src/workspaces/project" });
+            });
         }
         function enableDeclarationMap(): TestTscEdit {
             return {
@@ -529,7 +533,7 @@ console.log(a);`,
                 }),
                 "/home/src/workspaces/project/file1.ts": `export class  C { }`,
                 "/home/src/workspaces/project/file2.ts": `export class D { }`,
-            }, { currentDirectory: "/home/src/workspaces/project" }),
+            }),
         edits: [
             {
                 caption: "delete file with imports",
@@ -582,7 +586,7 @@ console.log(a);`,
                         [K in keyof C]: { wrapped: C[K] }
                     }
                 `,
-            }, { currentDirectory: "/home/src/workspaces/project" }),
+            }),
         edits: [{
             caption: "modify js file",
             edit: sys => sys.appendFile("/home/src/workspaces/project/src/bug.js", `export const something = 1;`),
@@ -635,7 +639,7 @@ console.log(a);`,
                                 ONE = 1
                             }
                         `,
-                    }, { currentDirectory: "/home/src/workspaces/project" }),
+                    }),
                 edits: [
                     {
                         caption: "change enum value",

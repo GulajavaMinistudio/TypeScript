@@ -139,11 +139,11 @@ function forEachNoEmitChangesWorker(commandType: string[], compilerOptions: Comp
             "/home/src/workspaces/project/tsconfig.json": jsonToReadableText({
                 compilerOptions: compilerOptionsToConfigJson(compilerOptions),
             }),
-        }, { currentDirectory: "/home/src/workspaces/project" });
+        });
     }
 }
 
-export function forEachNoEmitChanges(commandType: string[]) {
+export function forEachNoEmitChanges(commandType: string[]): void {
     describe("when noEmit changes between compilation", () => {
         forEachNoEmitChangesWorker(commandType, { incremental: true });
         forEachNoEmitChangesWorker(commandType, { incremental: true, declaration: true });
@@ -206,7 +206,7 @@ function editsForDtsChanges(
     ];
 }
 
-export function forEachNoEmitDtsChanges(commandType: string[]) {
+export function forEachNoEmitDtsChanges(commandType: string[]): void {
     describe("dts errors with declaration enable changes", () => {
         if (commandType[0] !== "-b") return; // Only test non multiple file errors with -b
         [false, true].forEach(asModules =>
@@ -341,7 +341,7 @@ function forEachNoEmitAndErrors(
     });
 }
 
-export function forEachNoEmitTsc(commandType: string[]) {
+export function forEachNoEmitTsc(commandType: string[]): void {
     forEachNoEmitAndErrors((subScenario, sys, aTsContent, fixedATsContent, compilerOptions) =>
         verifyTsc({
             scenario: "noEmit",
@@ -385,7 +385,7 @@ export function forEachNoEmitTsc(commandType: string[]) {
     );
 }
 
-export function forEachNoEmitTscWatch(commandType: string[]) {
+export function forEachNoEmitTscWatch(commandType: string[]): void {
     forEachNoEmitAndErrors((subScenario, sys, aTsContent, fixedATsContent, compilerOptions) =>
         verifyTscWatch({
             scenario: "noEmit",
